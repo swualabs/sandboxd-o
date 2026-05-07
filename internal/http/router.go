@@ -1,0 +1,17 @@
+package httpserver
+
+import "github.com/gin-gonic/gin"
+
+func newRouter(s *Server) *gin.Engine {
+	r := gin.New()
+	r.Use(gin.Recovery())
+
+	r.GET("/healthz", s.healthz)
+	r.GET("/v1/sandboxes", s.listSandboxes)
+	r.GET("/v1/sandboxes/:id", s.getSandbox)
+	r.POST("/v1/sandboxes", s.createSandbox)
+	r.DELETE("/v1/sandboxes/:id", s.deleteSandbox)
+	r.POST("/v1/reconcile", s.reconcile)
+
+	return r
+}
