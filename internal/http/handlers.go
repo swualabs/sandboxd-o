@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"example.com/sandbox-demo/internal/model"
@@ -54,13 +55,15 @@ func (s *Server) getSandbox(c *gin.Context) {
 }
 
 func (s *Server) listSandboxes(c *gin.Context) {
-	items, err := s.svc.ListSandboxes(c.Request.Context())
+	cursor := c.Query("cursor")
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	items, nextCursor, err := s.svc.ListSandboxesPage(c.Request.Context(), cursor, limit)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err)
 		return
 	}
 
-	respondJSON(c, http.StatusOK, gin.H{"items": items}, s.ipSvc.Lookup(c.Request.Context()))
+	respondJSON(c, http.StatusOK, gin.H{"items": items, "next_cursor": nextCursor}, s.ipSvc.Lookup(c.Request.Context()))
 }
 
 func (s *Server) deleteSandbox(c *gin.Context) {
@@ -83,4 +86,39 @@ func (s *Server) reconcile(c *gin.Context) {
 	}
 
 	respondJSON(c, http.StatusOK, gin.H{"ok": true}, s.ipSvc.Lookup(c.Request.Context()))
+}
+
+func (s *Server) getContainerLogs(c *gin.Context) {
+	cursor := c.Query("cursor")
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	sandboxID := c.Param("id")
+	containerName := c.Param("name")
+
+	page, err := s.svc.GetContainerLogs(c.Request.Context(), sandboxID, containerName, cursor, limit)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			sbx, sbErr := s.svc.GetSandbox(c.Request.Context(), sandboxID)
+			if sbErr == nil {
+				if _, ok := sbx.Containers[containerName]; ok {
+					respondJSON(c, http.StatusOK, gin.H{
+						"sandbox_id": sandboxID,
+						"container":  containerName,
+						"logs": gin.H{
+							"lines":       []string{},
+							"next_cursor": "0",
+							"has_more":    false,
+						},
+					}, s.ipSvc.Lookup(c.Request.Context()))
+					return
+				}
+			}
+			respondErrorMessage(c, http.StatusNotFound, "logs not found")
+			return
+		}
+
+		respondError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	respondJSON(c, http.StatusOK, gin.H{"sandbox_id": sandboxID, "container": containerName, "logs": page}, s.ipSvc.Lookup(c.Request.Context()))
 }
