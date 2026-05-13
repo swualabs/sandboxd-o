@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"sandboxd/internal/model"
-	"sandboxd/internal/network"
+	"sandboxd-o/sandboxd/model"
+	"sandboxd-o/sandboxd/network"
 
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"

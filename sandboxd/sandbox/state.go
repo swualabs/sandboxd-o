@@ -3,7 +3,7 @@ package sandbox
 import (
 	"time"
 
-	"sandboxd/internal/model"
+	"sandboxd-o/sandboxd/model"
 )
 
 const (

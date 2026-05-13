@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"sandboxd/internal/config"
-	"sandboxd/internal/model"
-	"sandboxd/internal/network"
-	"sandboxd/internal/store"
+	"sandboxd-o/sandboxd/config"
+	"sandboxd-o/sandboxd/model"
+	"sandboxd-o/sandboxd/network"
+	"sandboxd-o/sandboxd/store"
 
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/coreos/go-iptables/iptables"

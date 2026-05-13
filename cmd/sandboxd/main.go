@@ -9,10 +9,11 @@ import (
 	"syscall"
 	"time"
 
+	"sandboxd-o/sandboxd/config"
+	httpserver "sandboxd-o/sandboxd/http"
+	"sandboxd-o/sandboxd/sandbox"
+
 	"github.com/joho/godotenv"
-	"sandboxd/internal/config"
-	httpserver "sandboxd/internal/http"
-	"sandboxd/internal/sandbox"
 )
 
 func main() {

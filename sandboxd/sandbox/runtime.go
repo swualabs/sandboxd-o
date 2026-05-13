@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"sandboxd/internal/config"
-	"sandboxd/internal/model"
-	"sandboxd/internal/network"
+	"sandboxd-o/sandboxd/config"
+	"sandboxd-o/sandboxd/model"
+	"sandboxd-o/sandboxd/network"
 
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 )

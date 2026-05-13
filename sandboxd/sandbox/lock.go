@@ -6,8 +6,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"sandboxd-o/sandboxd/config"
+
 	"golang.org/x/sys/unix"
-	"sandboxd/internal/config"
 )
 
 func (s *Service) acquireSandboxLock(sandboxID string) (func(), error) {

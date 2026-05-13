@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"sandboxd/internal/model"
+	"sandboxd-o/sandboxd/model"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 )

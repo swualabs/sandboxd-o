@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"sandboxd/internal/model"
+	"sandboxd-o/sandboxd/model"
 )
 
 type FileStore struct {

@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"time"
 
-	"sandboxd/internal/model"
-	"sandboxd/internal/sandbox"
+	"sandboxd-o/sandboxd/model"
+	"sandboxd-o/sandboxd/sandbox"
 
 	"github.com/gin-gonic/gin"
 )
