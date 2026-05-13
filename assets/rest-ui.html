@@ -189,17 +189,51 @@
             originEl.textContent = baseUrl
 
             const defaultCreatePayload = {
-                id: 'sbx-ui-demo',
+                id: 'sbx-wordpress-demo',
                 egress: true,
-                ports: [{ hostPort: 30180, containerPort: 8080, protocol: 'tcp' }],
+                ports: [
+                    {
+                        hostPort: 30080,
+                        containerPort: 80,
+                        protocol: 'tcp',
+                    },
+                ],
                 containers: [
                     {
-                        name: 'web',
-                        image: 'python:3.12-alpine',
-                        args: ['sh', '-c', 'python -m http.server 8080'],
-                        env: [],
+                        name: 'wordpress',
+                        image: 'wordpress:6.9.4-php8.3-apache',
+                        args: [
+                            'sh',
+                            '-c',
+                            'for i in $(seq 1 90); do php -r \'$s=@fsockopen("127.0.0.1",3306,$e,$es,1); if($s){fclose($s); exit(0);} exit(1);\' && break; sleep 2; done; exec docker-entrypoint.sh apache2-foreground',
+                        ],
+                        env: [
+                            'WORDPRESS_DB_HOST=127.0.0.1:3306',
+                            'WORDPRESS_DB_USER=wordpress',
+                            'WORDPRESS_DB_PASSWORD=wordpress-pass',
+                            'WORDPRESS_DB_NAME=wordpress',
+                        ],
                         workDir: '',
-                        resource: { cpu: '200m', memory: '256Mi' },
+                        resource: {
+                            cpu: '200m',
+                            memory: '512Mi',
+                        },
+                    },
+                    {
+                        name: 'mysql',
+                        image: 'mysql:8.4',
+                        args: [],
+                        env: [
+                            'MYSQL_DATABASE=wordpress',
+                            'MYSQL_USER=wordpress',
+                            'MYSQL_PASSWORD=wordpress-pass',
+                            'MYSQL_ROOT_PASSWORD=root-pass',
+                        ],
+                        workDir: '',
+                        resource: {
+                            cpu: '200m',
+                            memory: '768Mi',
+                        },
                     },
                 ],
             }
