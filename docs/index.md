@@ -384,7 +384,11 @@ Note:
         {
             "name": "wordpress",
             "image": "wordpress:6.9.4-php8.3-apache",
-            "args": [],
+            "args": [
+                "sh",
+                "-c",
+                "for i in $(seq 1 90); do php -r '$s=@fsockopen(\"127.0.0.1\",3306,$e,$es,1); if($s){fclose($s); exit(0);} exit(1);' && break; sleep 2; done; exec docker-entrypoint.sh apache2-foreground"
+            ],
             "env": [
                 "WORDPRESS_DB_HOST=127.0.0.1:3306",
                 "WORDPRESS_DB_USER=wordpress",
