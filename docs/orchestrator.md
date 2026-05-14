@@ -1,0 +1,205 @@
+---
+title: Orchestrator API
+nav_order: 2
+---
+
+Base URL: `http://localhost:8082`
+
+## Health
+
+- `GET /healthz`
+- Success: `200 OK`
+
+**Response**
+
+```json
+{
+  "ok": true
+}
+```
+
+## Node APIs
+
+### Register Node
+
+- `POST /api/v1/nodes/register`
+- Success: `200 OK`
+- Failure: `400 Bad Request`
+
+**Request**
+
+```json
+{
+  "name": "sandbox-node-1",
+  "ip": "192.168.0.3",
+  "port": 8080
+}
+```
+
+**Response**
+
+```json
+{
+  "node": {
+    "name": "sandbox-node-1",
+    "ip": "192.168.0.3",
+    "port": 8080,
+    "state": "Unknown",
+    "source": "api",
+    "success_streak": 0,
+    "failure_streak": 0,
+    "created_at": "2026-05-14T01:00:00Z",
+    "updated_at": "2026-05-14T01:00:00Z",
+    "sandboxd_base_url": "http://192.168.0.3:8080"
+  }
+}
+```
+
+### List Nodes
+
+- `GET /api/v1/nodes`
+- Success: `200 OK`
+
+**Response**
+
+```json
+{
+  "items": [
+    {
+      "name": "sandbox-node-1",
+      "ip": "192.168.0.3",
+      "port": 8080,
+      "state": "Ready",
+      "source": "config",
+      "last_error": "",
+      "success_streak": 3,
+      "failure_streak": 0,
+      "created_at": "2026-05-14T01:00:00Z",
+      "updated_at": "2026-05-14T01:02:00Z",
+      "last_heartbeat": "2026-05-14T01:02:00Z",
+      "sandboxd_base_url": "http://192.168.0.3:8080"
+    }
+  ]
+}
+```
+
+### Get Node
+
+- `GET /api/v1/nodes/{name}`
+- Success: `200 OK`
+- Failure: `404 Not Found`
+
+**Response**
+
+```json
+{
+  "node": {
+    "name": "sandbox-node-1",
+    "ip": "192.168.0.3",
+    "port": 8080,
+    "state": "Ready",
+    "source": "config",
+    "success_streak": 3,
+    "failure_streak": 0,
+    "sandboxd_base_url": "http://192.168.0.3:8080"
+  }
+}
+```
+
+### Delete Node
+
+- `DELETE /api/v1/nodes/{name}`
+- Success: `200 OK`
+
+**Response**
+
+```json
+{
+  "deleted": "sandbox-node-1"
+}
+```
+
+### Trigger Heartbeat Probe
+
+- `POST /api/v1/nodes/{name}/heartbeat`
+- Success: `200 OK`
+- Failure: `404 Not Found`
+
+**Response**
+
+```json
+{
+  "node": {
+    "name": "sandbox-node-1",
+    "ip": "192.168.0.3",
+    "port": 8080,
+    "state": "Ready",
+    "sandboxd_base_url": "http://192.168.0.3:8080"
+  },
+  "heartbeat": "ok",
+  "error": ""
+}
+```
+
+## Sandboxd Proxy APIs
+
+### List Sandboxes
+
+- `GET /api/v1/nodes/{name}/sandboxes?cursor=<id>&limit=<n>`
+
+### Get Sandbox
+
+- `GET /api/v1/nodes/{name}/sandboxes/{id}`
+
+### Create Sandbox
+
+- `POST /api/v1/nodes/{name}/sandboxes`
+- Body: same as sandboxd `CreateSandboxRequest`
+
+### Delete Sandbox
+
+- `DELETE /api/v1/nodes/{name}/sandboxes/{id}`
+
+### Get Container Logs
+
+- `GET /api/v1/nodes/{name}/sandboxes/{id}/containers/{container}/logs?cursor=<offset>&limit=<n>`
+
+### Reconcile
+
+- `POST /api/v1/nodes/{name}/reconcile`
+
+## Bootstrap Config
+
+Config file path: `ORCH_CONFIG_PATH` (default: `configs/apiserver.yaml`)
+
+```yaml
+listenAddress: ":8082"
+nodes:
+  - name: "sandbox-node-1"
+    ip: "127.0.0.1"
+    port: 8080
+```
+
+Notes:
+
+- Nodes in config are re-registered on every orchestrator start.
+- If a config node was deleted via API, restart adds it back.
+
+## Environment Variables
+
+- `ORCH_HTTP_ADDR` (default: from config `listenAddress`, fallback `:8082`)
+- `ORCH_CONFIG_PATH` (default: `configs/apiserver.yaml`)
+- `ORCH_SQLITE_PATH` (default: `build/orchestrator.db`)
+- `ORCH_HEARTBEAT_INTERVAL` (default: `10s`)
+- `ORCH_NODE_PROBE_TIMEOUT` (default: `3s`)
+- `ORCH_READY_SUCCESS_THRESHOLD` (default: `2`)
+- `ORCH_NOTREADY_FAILURE_THRESHOLD` (default: `2`)
+- `ORCH_SHUTDOWN_TIMEOUT` (default: `5s`)
+
+## Common Error Response
+
+```json
+{
+  "error": "error message"
+}
+```
