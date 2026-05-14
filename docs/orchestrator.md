@@ -184,6 +184,7 @@ Notes:
 
 - Nodes in config are re-registered on every orchestrator start.
 - If a config node was deleted via API, restart adds it back.
+- If duplicate node names exist in config, orchestrator logs a warning and applies the last entry.
 
 ## Environment Variables
 
@@ -192,9 +193,14 @@ Notes:
 - `ORCH_SQLITE_PATH` (default: `build/orchestrator.db`)
 - `ORCH_HEARTBEAT_INTERVAL` (default: `10s`)
 - `ORCH_NODE_PROBE_TIMEOUT` (default: `3s`)
+- `ORCH_HEARTBEAT_PARALLEL` (default: `false`)
+- `ORCH_HEARTBEAT_MAX_PARALLEL` (default: `4`, minimum: `1`)
 - `ORCH_READY_SUCCESS_THRESHOLD` (default: `2`)
 - `ORCH_NOTREADY_FAILURE_THRESHOLD` (default: `2`)
 - `ORCH_SHUTDOWN_TIMEOUT` (default: `5s`)
+- `ORCH_LOG_DIR` (optional; when set, JSON logs are also written to rotating hourly files)
+- `ORCH_LOG_FILE_PREFIX` (default: `orchestrator`)
+- `APP_ENV` (optional; added to `app` log field, e.g. `orchestrator:prod`)
 
 ## Common Error Response
 

@@ -1,10 +1,15 @@
 package httpserver
 
-import "github.com/gin-gonic/gin"
+import (
+	"sandboxd-o/pkg/httplog"
+
+	"github.com/gin-gonic/gin"
+)
 
 func newRouter(s *Server) *gin.Engine {
 	r := gin.New()
-	r.Use(gin.Recovery())
+	r.Use(httplog.RecoveryLogger(s.log))
+	r.Use(httplog.RequestLogger(s.log))
 
 	r.GET("/", func(c *gin.Context) {
 		c.File("assets/rest-ui.html")

@@ -20,6 +20,8 @@ const (
 	defaultSQLitePath            = "/var/lib/sandboxd/orchestrator.db"
 	defaultHeartbeatInterval     = 10 * time.Second
 	defaultProbeTimeout          = 3 * time.Second
+	defaultHeartbeatParallel     = false
+	defaultHeartbeatMaxParallel  = 4
 	defaultReadySuccessThreshold = 2
 	defaultNotReadyFailThreshold = 2
 	defaultShutdownTimeout       = 5 * time.Second
@@ -31,6 +33,8 @@ type Config struct {
 	SQLitePath               string
 	HeartbeatInterval        time.Duration
 	ProbeTimeout             time.Duration
+	HeartbeatParallel        bool
+	HeartbeatMaxParallel     int
 	ReadySuccessThreshold    int
 	NotReadyFailureThreshold int
 	ShutdownTimeout          time.Duration
@@ -61,6 +65,8 @@ func Load() (Config, error) {
 		SQLitePath:               envutil.Get("ORCH_SQLITE_PATH", defaultSQLitePath),
 		HeartbeatInterval:        envutil.GetDuration("ORCH_HEARTBEAT_INTERVAL", defaultHeartbeatInterval),
 		ProbeTimeout:             envutil.GetDuration("ORCH_NODE_PROBE_TIMEOUT", defaultProbeTimeout),
+		HeartbeatParallel:        envutil.GetBool("ORCH_HEARTBEAT_PARALLEL", defaultHeartbeatParallel),
+		HeartbeatMaxParallel:     envutil.GetInt("ORCH_HEARTBEAT_MAX_PARALLEL", defaultHeartbeatMaxParallel),
 		ReadySuccessThreshold:    envutil.GetInt("ORCH_READY_SUCCESS_THRESHOLD", defaultReadySuccessThreshold),
 		NotReadyFailureThreshold: envutil.GetInt("ORCH_NOTREADY_FAILURE_THRESHOLD", defaultNotReadyFailThreshold),
 		ShutdownTimeout:          envutil.GetDuration("ORCH_SHUTDOWN_TIMEOUT", defaultShutdownTimeout),
@@ -73,6 +79,10 @@ func Load() (Config, error) {
 
 	if cfg.NotReadyFailureThreshold < 1 {
 		cfg.NotReadyFailureThreshold = 1
+	}
+
+	if cfg.HeartbeatMaxParallel < 1 {
+		cfg.HeartbeatMaxParallel = 1
 	}
 
 	if cfg.SQLitePath != ":memory:" {

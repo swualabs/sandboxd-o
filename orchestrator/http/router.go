@@ -1,15 +1,18 @@
 package http
 
 import (
+	"sandboxd-o/pkg/httplog"
+	"sandboxd-o/pkg/logging"
 	"sandboxd-o/orchestrator/http/handlers"
 	"sandboxd-o/orchestrator/service"
 
 	"github.com/gin-gonic/gin"
 )
 
-func NewRouter(svc *service.Service) *gin.Engine {
+func NewRouter(svc *service.Service, logger *logging.Logger) *gin.Engine {
 	r := gin.New()
-	r.Use(gin.Recovery())
+	r.Use(httplog.RecoveryLogger(logger))
+	r.Use(httplog.RequestLogger(logger))
 
 	h := handlers.New(svc)
 

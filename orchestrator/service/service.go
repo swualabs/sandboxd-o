@@ -3,8 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
+	"sync"
 	"strings"
 	"time"
 
@@ -34,9 +35,25 @@ func (s *Service) HTTPAddr() string               { return s.cfg.HTTPAddr }
 func (s *Service) ShutdownTimeout() time.Duration { return s.cfg.ShutdownTimeout }
 
 func (s *Service) BootstrapNodes(ctx context.Context) error {
+	seen := make(map[string]int)
 	for _, n := range s.cfg.Bootstrap.Nodes {
 		if err := validateNodeInput(n.Name, n.IP, n.Port); err != nil {
-			return fmt.Errorf("bootstrap node %s: %w", n.Name, err)
+			slog.Warn("skip invalid bootstrap node",
+				slog.String("name", n.Name),
+				slog.String("ip", n.IP),
+				slog.Int("port", n.Port),
+				slog.Any("error", err),
+			)
+			continue
+		}
+
+		seen[n.Name]++
+		if seen[n.Name] > 1 {
+			slog.Warn("duplicate bootstrap node name detected; last entry wins",
+				slog.String("name", n.Name),
+				slog.String("ip", n.IP),
+				slog.Int("port", n.Port),
+			)
 		}
 
 		if err := s.repo.UpsertNode(ctx, n.Name, n.IP, n.Port, "config"); err != nil {
@@ -65,13 +82,34 @@ func (s *Service) StartHeartbeatLoop(ctx context.Context) {
 func (s *Service) runHeartbeatOnce(ctx context.Context) {
 	nodes, err := s.repo.ListNodes(ctx)
 	if err != nil {
-		log.Printf("[orchestrator] list nodes failed: %v", err)
+		slog.Error("list nodes failed", slog.Any("error", err))
 		return
 	}
 
-	for _, n := range nodes {
-		s.probeNode(ctx, n)
+	if !s.cfg.HeartbeatParallel || len(nodes) <= 1 {
+		for _, n := range nodes {
+			s.probeNode(ctx, n)
+		}
+		return
 	}
+
+	parallel := s.cfg.HeartbeatMaxParallel
+	if parallel > len(nodes) {
+		parallel = len(nodes)
+	}
+
+	sem := make(chan struct{}, parallel)
+	var wg sync.WaitGroup
+	for _, n := range nodes {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(node types.Node) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			s.probeNode(ctx, node)
+		}(n)
+	}
+	wg.Wait()
 }
 
 func (s *Service) probeNode(ctx context.Context, n types.Node) {
@@ -86,6 +124,9 @@ func (s *Service) probeNode(ctx context.Context, n types.Node) {
 	next.LastHeartbeat = &now
 	if err == nil {
 		next.SuccessStreak++
+		if next.SuccessStreak > s.cfg.ReadySuccessThreshold {
+			next.SuccessStreak = s.cfg.ReadySuccessThreshold
+		}
 		next.FailureStreak = 0
 		next.LastError = ""
 		if next.State != types.NodeStateReady && next.SuccessStreak >= s.cfg.ReadySuccessThreshold {

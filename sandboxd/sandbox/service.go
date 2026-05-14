@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -109,7 +109,7 @@ func (s *Service) dbg(format string, args ...any) {
 		return
 	}
 
-	log.Printf("[sandbox-debug] "+format, args...)
+	slog.Debug(fmt.Sprintf(format, args...))
 }
 
 func (s *Service) CreateSandbox(ctx context.Context, req model.CreateSandboxRequest) (*model.Sandbox, error) {

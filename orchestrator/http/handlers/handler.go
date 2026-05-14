@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -53,7 +54,7 @@ func (h *Handler) ListNodes(c *gin.Context) {
 func (h *Handler) GetNode(c *gin.Context) {
 	n, err := h.svc.GetNode(c.Request.Context(), c.Param("name"))
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
 			return
 		}
@@ -77,7 +78,7 @@ func (h *Handler) DeleteNode(c *gin.Context) {
 func (h *Handler) HeartbeatNode(c *gin.Context) {
 	client, node, err := h.svc.SandboxClientForNode(c.Request.Context(), c.Param("name"))
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
 			return
 		}
@@ -170,7 +171,7 @@ func (h *Handler) NodeReconcile(c *gin.Context) {
 }
 
 func respondNodeErr(c *gin.Context, err error) {
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
 		return
 	}

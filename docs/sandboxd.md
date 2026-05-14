@@ -367,6 +367,12 @@ Note:
 }
 ```
 
+## Logging Environment Variables
+
+- `SANDBOX_LOG_DIR` (optional; when set, JSON logs are also written to rotating hourly files)
+- `SANDBOX_LOG_FILE_PREFIX` (default: `sandboxd`)
+- `APP_ENV` (optional; added to `app` log field, e.g. `sandboxd:prod`)
+
 # Example Create Payload (Wordpress)
 
 ```json

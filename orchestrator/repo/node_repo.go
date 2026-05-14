@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 
 	"sandboxd-o/orchestrator/types"
@@ -25,6 +28,27 @@ type SQLiteNodeRepo struct {
 }
 
 func NewSQLite(path string) (*SQLiteNodeRepo, error) {
+	if path != "" && path != ":memory:" {
+		if _, err := os.Stat(path); err != nil {
+			if os.IsNotExist(err) {
+				if dir := filepath.Dir(path); dir != "" && dir != "." {
+					if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
+						return nil, fmt.Errorf("create sqlite dir: %w", mkErr)
+					}
+				}
+
+				f, createErr := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+				if createErr != nil {
+					return nil, fmt.Errorf("create sqlite db file: %w", createErr)
+				}
+				_ = f.Close()
+				slog.Warn("sqlite db file not found; created new file", slog.String("path", path))
+			} else {
+				return nil, fmt.Errorf("stat sqlite db file: %w", err)
+			}
+		}
+	}
+
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err
@@ -77,10 +101,6 @@ ON CONFLICT(name) DO UPDATE SET
   ip=excluded.ip,
   port=excluded.port,
   source=excluded.source,
-  state=excluded.state,
-  success_streak=0,
-  failure_streak=0,
-  last_error='',
   updated_at=excluded.updated_at;
 `
 	_, err := r.db.ExecContext(ctx, q, name, ip, port, source, string(types.NodeStateUnknown), now, now)
