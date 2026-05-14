@@ -1,4 +1,3 @@
-listenAddress: ":8082"
 nodes:
   - name: "sandbox-node-1"
     ip: "127.0.0.1"
