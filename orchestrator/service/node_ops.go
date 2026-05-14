@@ -34,7 +34,7 @@ func (s *Service) RegisterNode(ctx context.Context, req types.RegisterNodeReques
 
 func (s *Service) DeleteNode(ctx context.Context, name string) error {
 	if strings.TrimSpace(name) == "" {
-		return fmt.Errorf("name is required")
+		return fmt.Errorf("%w: name is required", ErrInvalidInput)
 	}
 
 	if err := s.repo.DeleteNode(ctx, name); err != nil {

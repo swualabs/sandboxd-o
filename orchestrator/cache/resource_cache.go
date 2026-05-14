@@ -56,8 +56,13 @@ func (c *ResourceCache) ShouldPersist(name string, now time.Time, minInt, maxInt
 		return true
 	}
 
+	changed := !sameResources(e.Current, e.LastPersisted)
 	if now.Sub(e.LastPersistedAt) >= maxInt {
 		return true
+	}
+
+	if !changed {
+		return false
 	}
 
 	if now.Sub(e.LastPersistedAt) < minInt {
@@ -65,4 +70,16 @@ func (c *ResourceCache) ShouldPersist(name string, now time.Time, minInt, maxInt
 	}
 
 	return true
+}
+
+func sameResources(a, b types.NodeResources) bool {
+	return a.CapacityCPUMilli == b.CapacityCPUMilli &&
+		a.CapacityMemoryBytes == b.CapacityMemoryBytes &&
+		a.AllocatableCPUMilli == b.AllocatableCPUMilli &&
+		a.AllocatableMemory == b.AllocatableMemory &&
+		a.UsedCPUMilli == b.UsedCPUMilli &&
+		a.UsedMemoryBytes == b.UsedMemoryBytes &&
+		a.AvailableCPUMilli == b.AvailableCPUMilli &&
+		a.AvailableMemory == b.AvailableMemory &&
+		a.MaxAllocPercent == b.MaxAllocPercent
 }

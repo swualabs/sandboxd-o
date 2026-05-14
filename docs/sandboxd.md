@@ -39,8 +39,7 @@ Base URL: `http://localhost:8080`
         "available_memory_bytes": 29662117888,
         "max_alloc_percent": 90,
         "updated_at": "2026-05-14T01:00:00Z"
-    },
-    "external_ip": "203.0.113.10"
+    }
 }
 ```
 

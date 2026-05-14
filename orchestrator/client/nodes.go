@@ -15,8 +15,18 @@ type NodeStatus struct {
 }
 
 func (c *Client) Healthz(ctx context.Context) error {
-	_, err := c.do(ctx, http.MethodGet, "/healthz", nil)
-	return err
+	out, err := c.do(ctx, http.MethodGet, "/healthz", nil)
+	if err != nil {
+		return err
+	}
+
+	if ok, exists := out["ok"]; exists {
+		if b, cast := ok.(bool); cast && b {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("healthz not ok")
 }
 
 func (c *Client) NodeStatus(ctx context.Context) (NodeStatus, error) {

@@ -34,7 +34,12 @@ func (h *Handler) RegisterNode(c *gin.Context) {
 
 	n, err := h.svc.RegisterNode(c.Request.Context(), req, "api")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		if errors.Is(err, service.ErrInvalidInput) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -68,7 +73,12 @@ func (h *Handler) GetNode(c *gin.Context) {
 
 func (h *Handler) DeleteNode(c *gin.Context) {
 	if err := h.svc.DeleteNode(c.Request.Context(), c.Param("name")); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		if errors.Is(err, service.ErrInvalidInput) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -99,12 +109,13 @@ func (h *Handler) HeartbeatNode(c *gin.Context) {
 		res = st.Resources
 	}
 
-	errMsg := errString(hbErr)
-	if errMsg == "" {
-		errMsg = errString(stErr)
-	}
-
-	c.JSON(http.StatusOK, gin.H{"node": node, "heartbeat": status, "resources": res, "error": errMsg})
+	c.JSON(http.StatusOK, gin.H{
+		"node":            node,
+		"heartbeat":       status,
+		"resources":       res,
+		"heartbeat_error": errString(hbErr),
+		"status_error":    errString(stErr),
+	})
 }
 
 func (h *Handler) NodeListSandboxes(c *gin.Context) {

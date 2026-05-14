@@ -121,7 +121,7 @@ func (l *Logger) Write(p []byte) (int, error) {
 	return l.writer.Write(p)
 }
 
-func PanicLogger(logger *Logger, ctx context.Context, recovered any) {
+func PanicLogger(logger *Logger, recovered any) {
 	if logger == nil {
 		return
 	}
@@ -326,8 +326,10 @@ func appName(service, env string) string {
 	if service != "" {
 		parts = append(parts, service)
 	}
+
 	if env != "" {
 		parts = append(parts, env)
 	}
+
 	return strings.Join(parts, ":")
 }

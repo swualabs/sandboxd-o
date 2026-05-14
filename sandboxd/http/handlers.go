@@ -25,7 +25,7 @@ func (s *Server) nodeStatus(c *gin.Context) {
 		return
 	}
 
-	respondJSON(c, http.StatusOK, gin.H{"ok": true, "resources": snap}, s.ipSvc.Lookup(c.Request.Context()))
+	c.JSON(http.StatusOK, gin.H{"ok": true, "resources": snap})
 }
 
 func (s *Server) createSandbox(c *gin.Context) {

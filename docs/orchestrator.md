@@ -24,7 +24,8 @@ Base URL: `http://localhost:8082`
 
 - `POST /api/v1/nodes/register`
 - Success: `200 OK`
-- Failure: `400 Bad Request`
+- Failure: `400 Bad Request` (validation)
+- Failure: `500 Internal Server Error` (storage/internal)
 
 **Request**
 
@@ -134,6 +135,8 @@ Base URL: `http://localhost:8082`
 
 - `DELETE /api/v1/nodes/{name}`
 - Success: `200 OK`
+- Failure: `400 Bad Request` (validation)
+- Failure: `500 Internal Server Error` (storage/internal)
 
 **Response**
 
@@ -161,7 +164,20 @@ Base URL: `http://localhost:8082`
         "sandboxd_base_url": "http://192.168.0.3:8080"
     },
     "heartbeat": "ok",
-    "error": ""
+    "resources": {
+        "capacity_cpu_milli": 8000,
+        "capacity_memory_bytes": 33554432000,
+        "allocatable_cpu_milli": 7200,
+        "allocatable_memory_bytes": 30198988800,
+        "used_cpu_milli": 900,
+        "used_memory_bytes": 1073741824,
+        "available_cpu_milli": 6300,
+        "available_memory_bytes": 29125246976,
+        "max_alloc_percent": 90,
+        "updated_at": "2026-05-14T01:02:00Z"
+    },
+    "heartbeat_error": "",
+    "status_error": ""
 }
 ```
 
