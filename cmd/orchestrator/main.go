@@ -12,10 +12,16 @@ import (
 	"time"
 
 	"sandboxd-o/orchestrator/config"
+	_ "sandboxd-o/orchestrator/docs"
 	httpserver "sandboxd-o/orchestrator/http"
 	"sandboxd-o/orchestrator/service"
 	"sandboxd-o/pkg/logging"
 )
+
+// @title Orchestrator API Server
+// @version 1.0
+// @BasePath /
+// @schemes http
 
 func main() {
 	cfg, err := config.Load()
@@ -56,8 +62,10 @@ func main() {
 	}
 	svc.StartHeartbeatLoop(ctx)
 	svc.StartResourceSyncLoop(ctx)
+	svc.StartSchedulerLoop(ctx)
+	svc.StartSandboxReconcileLoop(ctx)
 
-	router := httpserver.NewRouter(svc, logger)
+	router := httpserver.NewRouter(svc, cfg, logger)
 	srv := &nethttp.Server{
 		Addr:              svc.HTTPAddr(),
 		Handler:           router,

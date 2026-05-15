@@ -28,7 +28,7 @@ func TestNewRouter(t *testing.T) {
 	defer svc.Close()
 
 	lg, _ := logging.New(logging.Config{}, logging.Options{Service: "test"})
-	r := NewRouter(svc, lg)
+	r := NewRouter(svc, config.Config{}, lg)
 	if r == nil {
 		t.Fatal("router is nil")
 	}

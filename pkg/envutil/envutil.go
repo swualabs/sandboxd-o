@@ -30,6 +30,20 @@ func GetInt(key string, def int) int {
 	return n
 }
 
+func GetFloat64(key string, def float64) float64 {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return def
+	}
+
+	return f
+}
+
 func GetDuration(key string, def time.Duration) time.Duration {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {

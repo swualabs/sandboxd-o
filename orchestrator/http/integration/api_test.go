@@ -53,7 +53,7 @@ func TestAPI_AllEndpoints(t *testing.T) {
 	}
 
 	lg, _ := logging.New(logging.Config{}, logging.Options{Service: "test"})
-	orch := httptest.NewServer(ohttp.NewRouter(svc, lg))
+	orch := httptest.NewServer(ohttp.NewRouter(svc, orcfg.Config{}, lg))
 	defer orch.Close()
 
 	mustStatus(t, http.MethodGet, orch.URL+"/healthz", nil, 200)
@@ -71,6 +71,11 @@ func TestAPI_AllEndpoints(t *testing.T) {
 	mustStatus(t, http.MethodPost, orch.URL+"/api/v1/nodes/n1/sandboxes", createPayload, 200)
 	mustStatus(t, http.MethodPost, orch.URL+"/api/v1/nodes/n1/sandboxes", []byte(`{"id":"bad"`), 400)
 	mustStatus(t, http.MethodDelete, orch.URL+"/api/v1/nodes/n1", nil, 200)
+
+	mustStatus(t, http.MethodPost, orch.URL+"/api/v1/sandboxes", []byte(`{"id":"obj-1","spec":{"egress":true,"containers":[{"name":"app","image":"nginx","resource":{"cpu":"100m","memory":"64Mi"}}]}}`), 201)
+	mustStatus(t, http.MethodGet, orch.URL+"/api/v1/sandboxes", nil, 200)
+	mustStatus(t, http.MethodGet, orch.URL+"/api/v1/sandboxes/obj-1", nil, 200)
+	mustStatus(t, http.MethodDelete, orch.URL+"/api/v1/sandboxes/obj-1", nil, 200)
 }
 
 func newService(t *testing.T) *service.Service {

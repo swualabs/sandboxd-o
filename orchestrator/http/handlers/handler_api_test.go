@@ -61,10 +61,12 @@ func setupHandler(t *testing.T) (*Handler, *service.Service, *httptest.Server) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := svc.RegisterNode(context.Background(), types.RegisterNodeRequest{Name: "n1", IP: u.Hostname(), Port: port}, "api"); err != nil {
 		t.Fatal(err)
 	}
-	return New(svc), svc, sbx
+
+	return New(svc, config.Config{}), svc, sbx
 }
 
 func TestHandlers_AllEndpoints(t *testing.T) {
@@ -86,6 +88,10 @@ func TestHandlers_AllEndpoints(t *testing.T) {
 	r.DELETE("/nodes/:name/sandboxes/:id", h.NodeDeleteSandbox)
 	r.GET("/nodes/:name/sandboxes/:id/containers/:container/logs", h.NodeContainerLogs)
 	r.POST("/nodes/:name/reconcile", h.NodeReconcile)
+	r.POST("/sandboxes", h.CreateSandbox)
+	r.GET("/sandboxes", h.ListSandboxes)
+	r.GET("/sandboxes/:id", h.GetSandbox)
+	r.DELETE("/sandboxes/:id", h.DeleteSandbox)
 
 	must := func(method, path string, body []byte, code int) {
 		t.Helper()
@@ -95,10 +101,12 @@ func TestHandlers_AllEndpoints(t *testing.T) {
 		} else {
 			reader = bytes.NewReader(body)
 		}
+
 		req := httptest.NewRequest(method, path, reader)
 		if body != nil {
 			req.Header.Set("Content-Type", "application/json")
 		}
+
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 		if w.Code != code {
@@ -122,4 +130,41 @@ func TestHandlers_AllEndpoints(t *testing.T) {
 	must(http.MethodDelete, "/nodes/n1/sandboxes/s1", nil, 200)
 	must(http.MethodGet, "/nodes/n1/sandboxes/s1/containers/c1/logs?limit=100", nil, 200)
 	must(http.MethodPost, "/nodes/n1/reconcile", nil, 200)
+
+	must(http.MethodPost, "/sandboxes", []byte(`{"id":"obj-1","spec":{"egress":true,"containers":[{"name":"app","image":"nginx","resource":{"cpu":"100m","memory":"64Mi"}}]}}`), 201)
+	must(http.MethodPost, "/sandboxes", []byte(`{"id":"","spec":{"containers":[]}}`), 400)
+	must(http.MethodGet, "/sandboxes", nil, 200)
+	must(http.MethodGet, "/sandboxes/obj-1", nil, 200)
+	must(http.MethodDelete, "/sandboxes/obj-1", nil, 200)
+}
+
+func TestCreateSandbox_RateLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, svc, sbx := setupHandler(t)
+	defer svc.Close()
+	defer sbx.Close()
+
+	// Override handler with very small limiter for deterministic test.
+	h = New(svc, config.Config{CreateRPS: 1, CreateBurst: 1})
+
+	r := gin.New()
+	r.POST("/sandboxes", h.CreateSandbox)
+
+	body := []byte(`{"id":"rl-1","spec":{"egress":true,"containers":[{"name":"app","image":"nginx","resource":{"cpu":"100m","memory":"64Mi"}}]}}`)
+	req1 := httptest.NewRequest(http.MethodPost, "/sandboxes", bytes.NewReader(body))
+	req1.Header.Set("Content-Type", "application/json")
+	w1 := httptest.NewRecorder()
+	r.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusCreated {
+		t.Fatalf("first create code=%d body=%s", w1.Code, w1.Body.String())
+	}
+
+	body2 := []byte(`{"id":"rl-2","spec":{"egress":true,"containers":[{"name":"app","image":"nginx","resource":{"cpu":"100m","memory":"64Mi"}}]}}`)
+	req2 := httptest.NewRequest(http.MethodPost, "/sandboxes", bytes.NewReader(body2))
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusTooManyRequests {
+		t.Fatalf("second create code=%d want=%d body=%s", w2.Code, http.StatusTooManyRequests, w2.Body.String())
+	}
 }

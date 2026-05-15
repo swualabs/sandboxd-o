@@ -28,6 +28,12 @@ const (
 	defaultReadySuccessThreshold = 2
 	defaultNotReadyFailThreshold = 2
 	defaultShutdownTimeout       = 5 * time.Second
+	defaultSchedulerInterval     = 3 * time.Second
+	defaultReconcileInterval     = 5 * time.Second
+	defaultPortMin               = 10000
+	defaultPortMax               = 32767
+	defaultCreateRPS             = 20.0
+	defaultCreateBurst           = 40
 )
 
 type Config struct {
@@ -44,6 +50,12 @@ type Config struct {
 	ReadySuccessThreshold    int
 	NotReadyFailureThreshold int
 	ShutdownTimeout          time.Duration
+	SchedulerInterval        time.Duration
+	ReconcileInterval        time.Duration
+	HostPortMin              int
+	HostPortMax              int
+	CreateRPS                float64
+	CreateBurst              int
 	Bootstrap                types.APIServerConfig
 }
 
@@ -79,6 +91,12 @@ func Load() (Config, error) {
 		ReadySuccessThreshold:    envutil.GetInt("ORCH_READY_SUCCESS_THRESHOLD", defaultReadySuccessThreshold),
 		NotReadyFailureThreshold: envutil.GetInt("ORCH_NOTREADY_FAILURE_THRESHOLD", defaultNotReadyFailThreshold),
 		ShutdownTimeout:          envutil.GetDuration("ORCH_SHUTDOWN_TIMEOUT", defaultShutdownTimeout),
+		SchedulerInterval:        envutil.GetDuration("ORCH_SCHEDULER_INTERVAL", defaultSchedulerInterval),
+		ReconcileInterval:        envutil.GetDuration("ORCH_RECONCILE_INTERVAL", defaultReconcileInterval),
+		HostPortMin:              envutil.GetInt("ORCH_HOSTPORT_MIN", defaultPortMin),
+		HostPortMax:              envutil.GetInt("ORCH_HOSTPORT_MAX", defaultPortMax),
+		CreateRPS:                envutil.GetFloat64("ORCH_CREATE_RPS", defaultCreateRPS),
+		CreateBurst:              envutil.GetInt("ORCH_CREATE_BURST", defaultCreateBurst),
 		Bootstrap:                boot,
 	}
 
@@ -104,6 +122,30 @@ func Load() (Config, error) {
 
 	if cfg.ResourcePersistMaxInt <= 0 {
 		cfg.ResourcePersistMaxInt = defaultResourcePersistMaxInt
+	}
+
+	if cfg.SchedulerInterval <= 0 {
+		cfg.SchedulerInterval = defaultSchedulerInterval
+	}
+
+	if cfg.ReconcileInterval <= 0 {
+		cfg.ReconcileInterval = defaultReconcileInterval
+	}
+
+	if cfg.HostPortMin < 1 {
+		cfg.HostPortMin = defaultPortMin
+	}
+
+	if cfg.HostPortMax < cfg.HostPortMin {
+		cfg.HostPortMax = defaultPortMax
+	}
+
+	if cfg.CreateRPS <= 0 {
+		cfg.CreateRPS = defaultCreateRPS
+	}
+
+	if cfg.CreateBurst < 1 {
+		cfg.CreateBurst = defaultCreateBurst
 	}
 
 	if cfg.SQLitePath != ":memory:" {

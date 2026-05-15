@@ -1,0 +1,423 @@
+basePath: /
+definitions:
+  httpserver.ContainerLogsResponse:
+    properties:
+      container:
+        type: string
+      external_ip:
+        type: string
+      logs:
+        $ref: '#/definitions/sandbox.LogsPage'
+      sandbox_id:
+        type: string
+    type: object
+  httpserver.CreateSandboxResponse:
+    properties:
+      external_ip:
+        type: string
+      sandbox:
+        $ref: '#/definitions/model.Sandbox'
+    type: object
+  httpserver.DeleteSandboxResponse:
+    properties:
+      external_ip:
+        type: string
+      id:
+        type: string
+      phase:
+        type: string
+    type: object
+  httpserver.ErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  httpserver.GetSandboxResponse:
+    properties:
+      external_ip:
+        type: string
+      sandbox:
+        $ref: '#/definitions/model.Sandbox'
+    type: object
+  httpserver.HealthResponse:
+    properties:
+      ok:
+        type: boolean
+    type: object
+  httpserver.ListSandboxesResponse:
+    properties:
+      external_ip:
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/model.Sandbox'
+        type: array
+      next_cursor:
+        type: string
+    type: object
+  httpserver.NodeStatusResponse:
+    properties:
+      ok:
+        type: boolean
+      resources:
+        $ref: '#/definitions/model.NodeResourceSnapshot'
+    type: object
+  httpserver.ReconcileResponse:
+    properties:
+      external_ip:
+        type: string
+      ok:
+        type: boolean
+    type: object
+  model.ContainerState:
+    properties:
+      args:
+        items:
+          type: string
+        type: array
+      env:
+        items:
+          type: string
+        type: array
+      error:
+        type: string
+      id:
+        type: string
+      image:
+        type: string
+      name:
+        type: string
+      phase:
+        type: string
+      resource:
+        $ref: '#/definitions/model.ResourceSpec'
+      runtime:
+        type: string
+      taskPID:
+        type: integer
+      taskStatus:
+        type: string
+    type: object
+  model.CreateContainerRequest:
+    properties:
+      args:
+        items:
+          type: string
+        type: array
+      env:
+        items:
+          type: string
+        type: array
+      image:
+        type: string
+      name:
+        type: string
+      resource:
+        $ref: '#/definitions/model.ResourceSpec'
+      workDir:
+        type: string
+    type: object
+  model.CreateSandboxRequest:
+    properties:
+      containers:
+        items:
+          $ref: '#/definitions/model.CreateContainerRequest'
+        type: array
+      egress:
+        type: boolean
+      id:
+        type: string
+      ports:
+        items:
+          $ref: '#/definitions/model.PortMapping'
+        type: array
+    type: object
+  model.NodeResourceSnapshot:
+    properties:
+      allocatable_cpu_milli:
+        type: integer
+      allocatable_memory_bytes:
+        type: integer
+      available_cpu_milli:
+        type: integer
+      available_memory_bytes:
+        type: integer
+      capacity_cpu_milli:
+        type: integer
+      capacity_memory_bytes:
+        type: integer
+      max_alloc_percent:
+        type: integer
+      updated_at:
+        type: string
+      used_cpu_milli:
+        type: integer
+      used_memory_bytes:
+        type: integer
+    type: object
+  model.PortMapping:
+    properties:
+      containerPort:
+        type: integer
+      hostPort:
+        type: integer
+      protocol:
+        type: string
+    type: object
+  model.ResourceSpec:
+    properties:
+      cpu:
+        type: string
+      memory:
+        type: string
+    type: object
+  model.Sandbox:
+    properties:
+      bridgeName:
+        type: string
+      cniConfPath:
+        type: string
+      containers:
+        additionalProperties:
+          $ref: '#/definitions/model.ContainerState'
+        type: object
+      createdAt:
+        type: string
+      egress:
+        type: boolean
+      error:
+        type: string
+      id:
+        type: string
+      ip:
+        type: string
+      namespace:
+        type: string
+      pauseID:
+        type: string
+      phase:
+        type: string
+      ports:
+        items:
+          $ref: '#/definitions/model.PortMapping'
+        type: array
+      subnetCIDR:
+        type: string
+      updatedAt:
+        type: string
+    type: object
+  sandbox.LogsPage:
+    properties:
+      has_more:
+        type: boolean
+      lines:
+        items:
+          type: string
+        type: array
+      next_cursor:
+        type: string
+    type: object
+info:
+  contact: {}
+  description: Sandbox node agent API for gVisor-based sandbox lifecycle, runtime
+    status, logs, and reconcile operations.
+  title: Sandboxd API
+  version: "1.0"
+paths:
+  /healthz:
+    get:
+      description: Returns service health.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/httpserver.HealthResponse'
+      summary: Health check
+      tags:
+      - sandboxd-node
+  /v1/node/status:
+    get:
+      description: Returns unified node resource status used by orchestrator heartbeats
+        and scheduling.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/httpserver.NodeStatusResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+      summary: Get node resource snapshot
+      tags:
+      - sandboxd-node
+  /v1/reconcile:
+    post:
+      description: Triggers one reconcile pass for orphan/runtime consistency cleanup.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/httpserver.ReconcileResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+      summary: Trigger reconcile
+      tags:
+      - sandboxd-maintenance
+  /v1/sandboxes:
+    get:
+      description: Lists sandboxes with cursor-based pagination.
+      parameters:
+      - description: Pagination cursor
+        in: query
+        name: cursor
+        type: string
+      - description: Page size (default 20)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/httpserver.ListSandboxesResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+      summary: List sandboxes
+      tags:
+      - sandboxd-sandbox
+    post:
+      consumes:
+      - application/json
+      description: Validates request, persists state, and starts asynchronous provisioning
+        using CRI + runsc(gVisor).
+      parameters:
+      - description: Create sandbox request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/model.CreateSandboxRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/httpserver.CreateSandboxResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+      summary: Create sandbox (async)
+      tags:
+      - sandboxd-sandbox
+  /v1/sandboxes/{id}:
+    delete:
+      description: Deletes sandbox runtime artifacts and persisted state.
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/httpserver.DeleteSandboxResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+      summary: Delete sandbox
+      tags:
+      - sandboxd-sandbox
+    get:
+      description: Returns current sandbox state, including phase and container runtime
+        status.
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/httpserver.GetSandboxResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+      summary: Get sandbox
+      tags:
+      - sandboxd-sandbox
+  /v1/sandboxes/{id}/containers/{name}/logs:
+    get:
+      description: Reads container logs with cursor pagination over byte offsets.
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Container name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Cursor offset
+        in: query
+        name: cursor
+        type: string
+      - description: Max lines (default 100)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/httpserver.ContainerLogsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+      summary: Get container logs
+      tags:
+      - sandboxd-logs
+schemes:
+- http
+swagger: "2.0"

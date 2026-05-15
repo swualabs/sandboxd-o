@@ -11,6 +11,7 @@ import (
 type Service struct {
 	cfg       config.Config
 	repo      repo.NodeRepo
+	sbxRepo   repo.SandboxRepo
 	resources *cache.ResourceCache
 }
 
@@ -20,7 +21,7 @@ func New(cfg config.Config) (*Service, error) {
 		return nil, err
 	}
 
-	return &Service{cfg: cfg, repo: st, resources: cache.NewResourceCache()}, nil
+	return &Service{cfg: cfg, repo: st, sbxRepo: st, resources: cache.NewResourceCache()}, nil
 }
 
 func (s *Service) Close() error                   { return s.repo.Close() }

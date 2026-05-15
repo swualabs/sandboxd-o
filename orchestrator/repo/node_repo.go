@@ -111,6 +111,27 @@ CREATE TABLE IF NOT EXISTS node_resources (
   updated_at TEXT NOT NULL
 );
 `
+	const qSandboxes = `
+CREATE TABLE IF NOT EXISTS sandboxes (
+  id TEXT PRIMARY KEY,
+  spec_json TEXT NOT NULL,
+  status_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`
+	const qSandboxPorts = `
+CREATE TABLE IF NOT EXISTS sandbox_ports (
+  sandbox_id TEXT NOT NULL,
+  node_name TEXT NOT NULL,
+  host_port INTEGER NOT NULL,
+  container_port INTEGER NOT NULL,
+  protocol TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (node_name, host_port),
+  FOREIGN KEY (sandbox_id) REFERENCES sandboxes(id) ON DELETE CASCADE
+);
+`
 	if _, err := db.Exec(qNodes); err != nil {
 		return err
 	}
@@ -118,6 +139,12 @@ CREATE TABLE IF NOT EXISTS node_resources (
 		return err
 	}
 	if _, err := db.Exec(qResources); err != nil {
+		return err
+	}
+	if _, err := db.Exec(qSandboxes); err != nil {
+		return err
+	}
+	if _, err := db.Exec(qSandboxPorts); err != nil {
 		return err
 	}
 
@@ -156,6 +183,9 @@ ON CONFLICT(name) DO NOTHING;`
 }
 
 func (r *SQLiteNodeRepo) DeleteNode(ctx context.Context, name string) error {
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM sandbox_ports WHERE node_name=?`, name); err != nil {
+		return err
+	}
 	if _, err := r.db.ExecContext(ctx, `DELETE FROM node_resources WHERE name=?`, name); err != nil {
 		return err
 	}

@@ -36,8 +36,13 @@ func (s *Service) RegisterNode(ctx context.Context, req types.RegisterNodeReques
 }
 
 func (s *Service) DeleteNode(ctx context.Context, name string) error {
-	if strings.TrimSpace(name) == "" {
+	name = strings.TrimSpace(name)
+	if name == "" {
 		return fmt.Errorf("%w: name is required", ErrInvalidInput)
+	}
+
+	if err := s.detachNodeSandboxes(ctx, name); err != nil {
+		return err
 	}
 
 	if err := s.repo.DeleteNode(ctx, name); err != nil {
@@ -45,6 +50,48 @@ func (s *Service) DeleteNode(ctx context.Context, name string) error {
 	}
 
 	s.resources.Delete(name)
+	return nil
+}
+
+func (s *Service) detachNodeSandboxes(ctx context.Context, nodeName string) error {
+	if s.sbxRepo == nil {
+		return nil
+	}
+
+	client, _, _ := s.SandboxClientForNode(ctx, nodeName)
+
+	items, err := s.sbxRepo.ListSandboxes(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, sbx := range items {
+		if sbx.Status.NodeName != nodeName {
+			continue
+		}
+
+		_ = s.sbxRepo.ReleaseSandboxPorts(ctx, sbx.ID)
+
+		switch sbx.Status.Phase {
+		case types.SandboxPhaseDeleting:
+			_ = s.sbxRepo.DeleteSandbox(ctx, sbx.ID)
+		case types.SandboxPhaseRunning, types.SandboxPhaseScheduled:
+			if client != nil {
+				_, _ = client.DeleteSandbox(ctx, sbx.ID)
+			}
+			st := sbx.Status
+			st.Phase = types.SandboxPhaseFailed
+			st.LastError = "node removed"
+			st.NodeName = ""
+			st.AssignedPorts = nil
+			_ = s.sbxRepo.UpdateSandboxStatus(ctx, sbx.ID, st)
+		}
+	}
+
+	if client != nil {
+		_, _ = client.Reconcile(ctx)
+	}
+
 	return nil
 }
 

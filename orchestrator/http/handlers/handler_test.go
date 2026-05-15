@@ -43,7 +43,7 @@ func setupRouter(t *testing.T, sandboxdURL string) *httptest.Server {
 	_, _ = svc.RegisterNode(context.Background(), types.RegisterNodeRequest{Name: "node1", IP: ip, Port: port}, "api")
 
 	lg, _ := logging.New(logging.Config{}, logging.Options{Service: "test"})
-	r := ohttp.NewRouter(svc, lg)
+	r := ohttp.NewRouter(svc, cfg, lg)
 	return httptest.NewServer(r)
 }
 

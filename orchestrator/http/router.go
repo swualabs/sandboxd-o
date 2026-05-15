@@ -1,21 +1,28 @@
 package http
 
 import (
+	"sandboxd-o/orchestrator/config"
+	docs "sandboxd-o/orchestrator/docs"
 	"sandboxd-o/orchestrator/http/handlers"
 	"sandboxd-o/orchestrator/service"
 	"sandboxd-o/pkg/httplog"
 	"sandboxd-o/pkg/logging"
 
 	"github.com/gin-gonic/gin"
+	swaggerfiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
-func NewRouter(svc *service.Service, logger *logging.Logger) *gin.Engine {
+func NewRouter(svc *service.Service, cfg config.Config, logger *logging.Logger) *gin.Engine {
+	docs.SwaggerInfoorchestrator.BasePath = "/"
+
 	r := gin.New()
 	r.Use(httplog.RecoveryLogger(logger))
 	r.Use(httplog.RequestLogger(logger))
 
-	h := handlers.New(svc)
+	h := handlers.New(svc, cfg)
 
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerfiles.Handler, ginSwagger.InstanceName("orchestrator")))
 	r.GET("/healthz", h.Healthz)
 
 	api := r.Group("/api/v1")
@@ -32,6 +39,11 @@ func NewRouter(svc *service.Service, logger *logging.Logger) *gin.Engine {
 		api.DELETE("/nodes/:name/sandboxes/:id", h.NodeDeleteSandbox)
 		api.GET("/nodes/:name/sandboxes/:id/containers/:container/logs", h.NodeContainerLogs)
 		api.POST("/nodes/:name/reconcile", h.NodeReconcile)
+
+		api.POST("/sandboxes", h.CreateSandbox)
+		api.GET("/sandboxes", h.ListSandboxes)
+		api.GET("/sandboxes/:id", h.GetSandbox)
+		api.DELETE("/sandboxes/:id", h.DeleteSandbox)
 	}
 
 	return r

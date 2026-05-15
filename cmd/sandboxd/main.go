@@ -13,11 +13,17 @@ import (
 
 	"sandboxd-o/pkg/logging"
 	"sandboxd-o/sandboxd/config"
+	_ "sandboxd-o/sandboxd/docs"
 	httpserver "sandboxd-o/sandboxd/http"
 	"sandboxd-o/sandboxd/sandbox"
 
 	"github.com/joho/godotenv"
 )
+
+// @title Sandboxd(Node Agent) API Server
+// @version 1.0
+// @BasePath /
+// @schemes http
 
 func main() {
 	_ = godotenv.Load()

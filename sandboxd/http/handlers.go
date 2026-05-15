@@ -14,10 +14,25 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// healthz godoc
+// @Summary Health check
+// @Description Returns service health.
+// @Tags sandboxd-node
+// @Produce json
+// @Success 200 {object} HealthResponse
+// @Router /healthz [get]
 func (s *Server) healthz(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	c.JSON(http.StatusOK, HealthResponse{OK: true})
 }
 
+// nodeStatus godoc
+// @Summary Get node resource snapshot
+// @Description Returns unified node resource status used by orchestrator heartbeats and scheduling.
+// @Tags sandboxd-node
+// @Produce json
+// @Success 200 {object} NodeStatusResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /v1/node/status [get]
 func (s *Server) nodeStatus(c *gin.Context) {
 	snap, err := s.svc.NodeResourceSnapshot(c.Request.Context())
 	if err != nil {
@@ -25,9 +40,19 @@ func (s *Server) nodeStatus(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"ok": true, "resources": snap})
+	c.JSON(http.StatusOK, NodeStatusResponse{OK: true, Resources: snap})
 }
 
+// createSandbox godoc
+// @Summary Create sandbox (async)
+// @Description Validates request, persists state, and starts asynchronous provisioning using CRI + runsc(gVisor).
+// @Tags sandboxd-sandbox
+// @Accept json
+// @Produce json
+// @Param request body model.CreateSandboxRequest true "Create sandbox request"
+// @Success 202 {object} CreateSandboxResponse
+// @Failure 400 {object} ErrorResponse
+// @Router /v1/sandboxes [post]
 func (s *Server) createSandbox(c *gin.Context) {
 	var req model.CreateSandboxRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -48,9 +73,22 @@ func (s *Server) createSandbox(c *gin.Context) {
 		return
 	}
 
-	respondJSON(c, http.StatusAccepted, gin.H{"sandbox": sbx}, s.ipSvc.Lookup(c.Request.Context()))
+	c.JSON(http.StatusAccepted, CreateSandboxResponse{
+		Sandbox:    sbx,
+		ExternalIP: s.ipSvc.Lookup(c.Request.Context()),
+	})
 }
 
+// getSandbox godoc
+// @Summary Get sandbox
+// @Description Returns current sandbox state, including phase and container runtime status.
+// @Tags sandboxd-sandbox
+// @Produce json
+// @Param id path string true "Sandbox ID"
+// @Success 200 {object} GetSandboxResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /v1/sandboxes/{id} [get]
 func (s *Server) getSandbox(c *gin.Context) {
 	sbx, err := s.svc.GetSandbox(c.Request.Context(), c.Param("id"))
 	if err != nil {
@@ -63,9 +101,22 @@ func (s *Server) getSandbox(c *gin.Context) {
 		return
 	}
 
-	respondJSON(c, http.StatusOK, gin.H{"sandbox": sbx}, s.ipSvc.Lookup(c.Request.Context()))
+	c.JSON(http.StatusOK, GetSandboxResponse{
+		Sandbox:    sbx,
+		ExternalIP: s.ipSvc.Lookup(c.Request.Context()),
+	})
 }
 
+// listSandboxes godoc
+// @Summary List sandboxes
+// @Description Lists sandboxes with cursor-based pagination.
+// @Tags sandboxd-sandbox
+// @Produce json
+// @Param cursor query string false "Pagination cursor"
+// @Param limit query int false "Page size (default 20)"
+// @Success 200 {object} ListSandboxesResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /v1/sandboxes [get]
 func (s *Server) listSandboxes(c *gin.Context) {
 	cursor := c.Query("cursor")
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
@@ -75,9 +126,22 @@ func (s *Server) listSandboxes(c *gin.Context) {
 		return
 	}
 
-	respondJSON(c, http.StatusOK, gin.H{"items": items, "next_cursor": nextCursor}, s.ipSvc.Lookup(c.Request.Context()))
+	c.JSON(http.StatusOK, ListSandboxesResponse{
+		Items:      items,
+		NextCursor: nextCursor,
+		ExternalIP: s.ipSvc.Lookup(c.Request.Context()),
+	})
 }
 
+// deleteSandbox godoc
+// @Summary Delete sandbox
+// @Description Deletes sandbox runtime artifacts and persisted state.
+// @Tags sandboxd-sandbox
+// @Produce json
+// @Param id path string true "Sandbox ID"
+// @Success 200 {object} DeleteSandboxResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /v1/sandboxes/{id} [delete]
 func (s *Server) deleteSandbox(c *gin.Context) {
 	opCtx, cancel := context.WithTimeout(c.Request.Context(), 40*time.Second)
 	defer cancel()
@@ -86,9 +150,21 @@ func (s *Server) deleteSandbox(c *gin.Context) {
 		return
 	}
 
-	respondJSON(c, http.StatusOK, gin.H{"id": c.Param("id"), "phase": "deleted"}, s.ipSvc.Lookup(c.Request.Context()))
+	c.JSON(http.StatusOK, DeleteSandboxResponse{
+		ID:         c.Param("id"),
+		Phase:      "deleted",
+		ExternalIP: s.ipSvc.Lookup(c.Request.Context()),
+	})
 }
 
+// reconcile godoc
+// @Summary Trigger reconcile
+// @Description Triggers one reconcile pass for orphan/runtime consistency cleanup.
+// @Tags sandboxd-maintenance
+// @Produce json
+// @Success 200 {object} ReconcileResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /v1/reconcile [post]
 func (s *Server) reconcile(c *gin.Context) {
 	opCtx, cancel := context.WithTimeout(c.Request.Context(), 45*time.Second)
 	defer cancel()
@@ -97,9 +173,26 @@ func (s *Server) reconcile(c *gin.Context) {
 		return
 	}
 
-	respondJSON(c, http.StatusOK, gin.H{"ok": true}, s.ipSvc.Lookup(c.Request.Context()))
+	c.JSON(http.StatusOK, ReconcileResponse{
+		OK:         true,
+		ExternalIP: s.ipSvc.Lookup(c.Request.Context()),
+	})
 }
 
+// getContainerLogs godoc
+// @Summary Get container logs
+// @Description Reads container logs with cursor pagination over byte offsets.
+// @Tags sandboxd-logs
+// @Produce json
+// @Param id path string true "Sandbox ID"
+// @Param name path string true "Container name"
+// @Param cursor query string false "Cursor offset"
+// @Param limit query int false "Max lines (default 100)"
+// @Success 200 {object} ContainerLogsResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /v1/sandboxes/{id}/containers/{name}/logs [get]
 func (s *Server) getContainerLogs(c *gin.Context) {
 	cursor := c.Query("cursor")
 	limitRaw := c.Query("limit")
@@ -122,15 +215,16 @@ func (s *Server) getContainerLogs(c *gin.Context) {
 			sbx, sbErr := s.svc.GetSandbox(c.Request.Context(), sandboxID)
 			if sbErr == nil {
 				if _, ok := sbx.Containers[containerName]; ok {
-					respondJSON(c, http.StatusOK, gin.H{
-						"sandbox_id": sandboxID,
-						"container":  containerName,
-						"logs": gin.H{
-							"lines":       []string{},
-							"next_cursor": "0",
-							"has_more":    false,
+					c.JSON(http.StatusOK, ContainerLogsResponse{
+						SandboxID: sandboxID,
+						Container: containerName,
+						Logs: &sandbox.LogsPage{
+							Lines:      []string{},
+							NextCursor: "0",
+							HasMore:    false,
 						},
-					}, s.ipSvc.Lookup(c.Request.Context()))
+						ExternalIP: s.ipSvc.Lookup(c.Request.Context()),
+					})
 					return
 				}
 			}
@@ -148,5 +242,10 @@ func (s *Server) getContainerLogs(c *gin.Context) {
 		return
 	}
 
-	respondJSON(c, http.StatusOK, gin.H{"sandbox_id": sandboxID, "container": containerName, "logs": page}, s.ipSvc.Lookup(c.Request.Context()))
+	c.JSON(http.StatusOK, ContainerLogsResponse{
+		SandboxID:  sandboxID,
+		Container:  containerName,
+		Logs:       page,
+		ExternalIP: s.ipSvc.Lookup(c.Request.Context()),
+	})
 }
