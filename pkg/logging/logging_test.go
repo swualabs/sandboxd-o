@@ -30,13 +30,15 @@ func TestNewAndWrite(t *testing.T) {
 }
 
 func TestHelpers(t *testing.T) {
-	now := time.Now().UTC()
-	if !sameHour(now, now.Add(20*time.Minute)) {
+	base := time.Date(2026, 5, 15, 10, 10, 0, 0, time.UTC)
+	if !sameHour(base, base.Add(20*time.Minute)) {
 		t.Fatal("expected same hour")
 	}
-	if sameHour(now, now.Add(2*time.Hour)) {
+
+	if sameHour(base, base.Add(2*time.Hour)) {
 		t.Fatal("expected different hour")
 	}
+
 	PanicLogger(nil, "x")
 	_ = os.Setenv("DUMMY", "1")
 }

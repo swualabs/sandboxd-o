@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -233,10 +234,10 @@ func TestLoopsAndForEachNode(t *testing.T) {
 		t.Fatalf("expected loop updates hb=%d rs=%d", hb, rs)
 	}
 
-	count := 0
-	s.forEachNode(context.Background(), []types.Node{{Name: "a"}, {Name: "b"}}, func(context.Context, types.Node) { count++ })
-	if count != 2 {
-		t.Fatalf("count=%d", count)
+	var count atomic.Int32
+	s.forEachNode(context.Background(), []types.Node{{Name: "a"}, {Name: "b"}}, func(context.Context, types.Node) { count.Add(1) })
+	if count.Load() != 2 {
+		t.Fatalf("count=%d", count.Load())
 	}
 
 	r.listErr = errors.New("list fail")
