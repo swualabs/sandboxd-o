@@ -2,4 +2,5 @@
 **/*.local.*
 build
 coverage.output
+coverage.out
 .artifacts
