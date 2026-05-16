@@ -105,6 +105,29 @@ func (r *fakeRepo) UpdateNodeResources(ctx context.Context, name string, res typ
 	return nil
 }
 
+func (r *fakeRepo) AdjustNodeResourceUsage(ctx context.Context, name string, cpuMilliDelta, memBytesDelta int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	n := r.nodes[name]
+	n.Resources.UsedCPUMilli += cpuMilliDelta
+	if n.Resources.UsedCPUMilli < 0 {
+		n.Resources.UsedCPUMilli = 0
+	}
+
+	n.Resources.UsedMemoryBytes += memBytesDelta
+	if n.Resources.UsedMemoryBytes < 0 {
+		n.Resources.UsedMemoryBytes = 0
+	}
+
+	n.Resources.AvailableCPUMilli = max(n.Resources.AllocatableCPUMilli-n.Resources.UsedCPUMilli, 0)
+
+	n.Resources.AvailableMemory = max(n.Resources.AllocatableMemory-n.Resources.UsedMemoryBytes, 0)
+
+	r.nodes[name] = n
+	return nil
+}
+
 func testSvc(repo *fakeRepo, cfg config.Config) *Service {
 	return &Service{cfg: cfg, repo: repo, resources: cache.NewResourceCache()}
 }

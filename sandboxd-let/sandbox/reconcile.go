@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"sort"
 	"strings"
@@ -110,7 +111,9 @@ func (s *Service) StartReconcileLoop(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				_ = s.ReconcileOnce(ctx)
+				if err := s.ReconcileOnce(ctx); err != nil {
+					slog.Warn("reconcile tick failed", slog.Any("error", err))
+				}
 			}
 		}
 	}()

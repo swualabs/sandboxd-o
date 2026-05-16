@@ -22,6 +22,7 @@ type NodeRepo interface {
 	ListNodes(ctx context.Context) ([]types.Node, error)
 	UpdateHeartbeat(ctx context.Context, name string, state types.NodeState, successStreak, failureStreak int, lastError string, beatAt *time.Time) error
 	UpdateNodeResources(ctx context.Context, name string, res types.NodeResources) error
+	AdjustNodeResourceUsage(ctx context.Context, name string, cpuMilliDelta, memBytesDelta int64) error
 }
 
 type SQLiteNodeRepo struct {
@@ -314,6 +315,30 @@ updated_at=excluded.updated_at`
 		resUpdated,
 		updated,
 	)
+	return err
+}
+
+func (r *SQLiteNodeRepo) AdjustNodeResourceUsage(ctx context.Context, name string, cpuMilliDelta, memBytesDelta int64) error {
+	const q = `
+UPDATE node_resources
+SET
+  used_cpu_milli = MAX(0, used_cpu_milli + ?),
+  used_memory_bytes = MAX(0, used_memory_bytes + ?),
+  available_cpu_milli = MAX(0, allocatable_cpu_milli - MAX(0, used_cpu_milli + ?)),
+  available_memory_bytes = MAX(0, allocatable_memory_bytes - MAX(0, used_memory_bytes + ?)),
+  updated_at = ?
+WHERE name = ?`
+	_, err := r.db.ExecContext(
+		ctx,
+		q,
+		cpuMilliDelta,
+		memBytesDelta,
+		cpuMilliDelta,
+		memBytesDelta,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		name,
+	)
+
 	return err
 }
 

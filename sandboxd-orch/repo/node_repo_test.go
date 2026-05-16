@@ -124,3 +124,68 @@ func TestSQLiteNodeRepo_DeleteNode_ClearsReservedPorts(t *testing.T) {
 		t.Fatalf("sandbox row should remain after node delete: %v", err)
 	}
 }
+
+func TestSQLiteNodeRepo_AdjustNodeResourceUsage(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "orch.db")
+	r, err := NewSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLite err=%v", err)
+	}
+	defer r.Close()
+
+	ctx := context.Background()
+	if err := r.UpsertNode(ctx, "n1", "127.0.0.1", 8081, "api"); err != nil {
+		t.Fatalf("UpsertNode err=%v", err)
+	}
+
+	base := types.NodeResources{
+		CapacityCPUMilli:    4000,
+		CapacityMemoryBytes: 8 * 1024 * 1024 * 1024,
+		AllocatableCPUMilli: 3600,
+		AllocatableMemory:   6 * 1024 * 1024 * 1024,
+		UsedCPUMilli:        200,
+		UsedMemoryBytes:     512 * 1024 * 1024,
+		AvailableCPUMilli:   3400,
+		AvailableMemory:     5632 * 1024 * 1024,
+		MaxAllocPercent:     90,
+	}
+	if err := r.UpdateNodeResources(ctx, "n1", base); err != nil {
+		t.Fatalf("UpdateNodeResources err=%v", err)
+	}
+
+	// logical increment after scheduling success
+	if err := r.AdjustNodeResourceUsage(ctx, "n1", 300, 256*1024*1024); err != nil {
+		t.Fatalf("AdjustNodeResourceUsage + err=%v", err)
+	}
+
+	n, err := r.GetNode(ctx, "n1")
+	if err != nil {
+		t.Fatalf("GetNode err=%v", err)
+	}
+
+	if n.Resources.UsedCPUMilli != 500 {
+		t.Fatalf("used cpu want=500 got=%d", n.Resources.UsedCPUMilli)
+	}
+
+	if n.Resources.AvailableCPUMilli != 3100 {
+		t.Fatalf("available cpu want=3100 got=%d", n.Resources.AvailableCPUMilli)
+	}
+
+	// logical decrement on delete should floor at zero
+	if err := r.AdjustNodeResourceUsage(ctx, "n1", -5000, -20*1024*1024*1024); err != nil {
+		t.Fatalf("AdjustNodeResourceUsage - err=%v", err)
+	}
+
+	n, err = r.GetNode(ctx, "n1")
+	if err != nil {
+		t.Fatalf("GetNode2 err=%v", err)
+	}
+
+	if n.Resources.UsedCPUMilli != 0 || n.Resources.UsedMemoryBytes != 0 {
+		t.Fatalf("used resources should floor at zero: %+v", n.Resources)
+	}
+
+	if n.Resources.AvailableCPUMilli != base.AllocatableCPUMilli || n.Resources.AvailableMemory != base.AllocatableMemory {
+		t.Fatalf("available should return to allocatable: %+v", n.Resources)
+	}
+}

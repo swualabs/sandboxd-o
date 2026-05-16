@@ -1,0 +1,46 @@
+# May not be able to access WordPress for a certain period of time after creating the Sandbox.
+# This is normal as it includes a script that waits until the DB becomes available.
+
+apiVersion: sandboxd.o/v1
+kind: Sandbox
+id: sbx-wordpress-demo
+spec:
+  egress: true
+  ttl_seconds: 3600
+  ports:
+    - host_port: 0
+      container_port: 80
+      protocol: tcp
+  containers:
+    - name: wordpress
+      image: wordpress:6.9.4-php8.3-apache
+      args:
+        - sh
+        - -c
+        - >-
+          for i in $(seq 1 90); do php -r
+          '$s=@fsockopen("127.0.0.1",3306,$e,$es,1);
+          if($s){fclose($s); exit(0);} exit(1);'
+          && break; sleep 2; done;
+          exec docker-entrypoint.sh apache2-foreground
+      env:
+        - WORDPRESS_DB_HOST=127.0.0.1:3306
+        - WORDPRESS_DB_USER=wordpress
+        - WORDPRESS_DB_PASSWORD=wordpress-pass
+        - WORDPRESS_DB_NAME=wordpress
+      work_dir: ""
+      resource:
+        cpu: 200m
+        memory: 512Mi
+    - name: mysql
+      image: mysql:8.4
+      args: []
+      env:
+        - MYSQL_DATABASE=wordpress
+        - MYSQL_USER=wordpress
+        - MYSQL_PASSWORD=wordpress-pass
+        - MYSQL_ROOT_PASSWORD=root-pass
+      work_dir: ""
+      resource:
+        cpu: 200m
+        memory: 768Mi
