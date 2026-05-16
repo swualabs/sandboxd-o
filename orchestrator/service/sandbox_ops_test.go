@@ -486,6 +486,66 @@ func TestDeleteNode_MarksScheduledOrRunningSandboxFailed(t *testing.T) {
 	}
 }
 
+func TestListAndTriggerReconcile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/sandboxes":
+			_ = json.NewEncoder(w).Encode(map[string]any{"sandbox": map[string]any{"id": "sbx-trg"}})
+		case r.Method == http.MethodDelete && r.URL.Path == "/v1/sandboxes/sbx-trg":
+			_ = json.NewEncoder(w).Encode(map[string]any{"deleted": "sbx-trg"})
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		}
+	}))
+	defer server.Close()
+
+	s := newServiceWithNode(t, server)
+	defer s.Close()
+
+	_, err := s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
+		ID: "sbx-trg",
+		Spec: types.SandboxSpec{
+			Containers: []types.SandboxContainerSpec{
+				{Name: "c1", Image: "nginx", Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.runSchedulerOnce(context.Background())
+
+	items, err := s.ListSandboxes(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(items) == 0 {
+		t.Fatal("expected list items")
+	}
+
+	if err := s.TriggerSandboxReconcile(context.Background(), "sbx-trg"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStartLoops(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "resources": map[string]any{"capacity_cpu_milli": 1000}})
+	}))
+	defer server.Close()
+
+	s := newServiceWithNode(t, server)
+	defer s.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s.StartSchedulerLoop(ctx)
+	s.StartSandboxReconcileLoop(ctx)
+	time.Sleep(120 * time.Millisecond)
+	cancel()
+}
+
 func TestDeleteSandbox_WhenNodeAlreadyRemoved_CleansLocally(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.Path == "/v1/sandboxes" {
