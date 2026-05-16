@@ -76,7 +76,7 @@ type Sandbox struct {
 
 type SandboxSpec struct {
 	Egress     bool                   `json:"egress" yaml:"egress"`
-	TTLSeconds int64                  `json:"ttlSeconds,omitempty" yaml:"ttlSeconds,omitempty"`
+	TTLSeconds int64                  `json:"ttl_seconds,omitempty" yaml:"ttl_seconds,omitempty"`
 	Ports      []SandboxPortSpec      `json:"ports,omitempty" yaml:"ports,omitempty"`
 	Containers []SandboxContainerSpec `json:"containers" yaml:"containers"`
 }
@@ -86,7 +86,7 @@ type SandboxContainerSpec struct {
 	Image    string          `json:"image" yaml:"image"`
 	Args     []string        `json:"args,omitempty" yaml:"args,omitempty"`
 	Env      []string        `json:"env,omitempty" yaml:"env,omitempty"`
-	WorkDir  string          `json:"workDir,omitempty" yaml:"workDir,omitempty"`
+	WorkDir  string          `json:"work_dir,omitempty" yaml:"work_dir,omitempty"`
 	Resource SandboxResource `json:"resource" yaml:"resource"`
 }
 
@@ -96,23 +96,23 @@ type SandboxResource struct {
 }
 
 type SandboxPortSpec struct {
-	HostPort      int    `json:"hostPort,omitempty" yaml:"hostPort,omitempty"`
-	ContainerPort int    `json:"containerPort" yaml:"containerPort"`
+	HostPort      int    `json:"host_port,omitempty" yaml:"host_port,omitempty"`
+	ContainerPort int    `json:"container_port" yaml:"container_port"`
 	Protocol      string `json:"protocol,omitempty" yaml:"protocol,omitempty"`
 }
 
 type SandboxStatus struct {
 	Phase         SandboxPhase        `json:"phase"`
-	NodeName      string              `json:"nodeName,omitempty"`
-	AssignedPorts []SandboxPortAssign `json:"assignedPorts,omitempty"`
-	SandboxdID    string              `json:"sandboxdID,omitempty"`
-	ExpireAt      *time.Time          `json:"expireAt,omitempty"`
-	LastError     string              `json:"lastError,omitempty"`
+	NodeName      string              `json:"node_name,omitempty"`
+	AssignedPorts []SandboxPortAssign `json:"assigned_ports,omitempty"`
+	SandboxdID    string              `json:"sandboxd_id,omitempty"`
+	ExpireAt      *time.Time          `json:"expire_at,omitempty"`
+	LastError     string              `json:"last_error,omitempty"`
 }
 
 type SandboxPortAssign struct {
-	HostPort      int    `json:"hostPort"`
-	ContainerPort int    `json:"containerPort"`
+	HostPort      int    `json:"host_port"`
+	ContainerPort int    `json:"container_port"`
 	Protocol      string `json:"protocol"`
 }
 

@@ -57,6 +57,10 @@ func NewSQLite(path string) (*SQLiteNodeRepo, error) {
 
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
+	if _, err := db.Exec(`PRAGMA foreign_keys = ON;`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("enable sqlite foreign keys: %w", err)
+	}
 	if err := migrate(db); err != nil {
 		_ = db.Close()
 		return nil, err

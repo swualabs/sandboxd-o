@@ -58,7 +58,7 @@ func (s *Service) detachNodeSandboxes(ctx context.Context, nodeName string) erro
 		return nil
 	}
 
-	client, _, _ := s.SandboxClientForNode(ctx, nodeName)
+	client, _, _ := s.SandboxOpClientForNode(ctx, nodeName)
 
 	items, err := s.sbxRepo.ListSandboxes(ctx)
 	if err != nil {
@@ -70,7 +70,9 @@ func (s *Service) detachNodeSandboxes(ctx context.Context, nodeName string) erro
 			continue
 		}
 
-		_ = s.sbxRepo.ReleaseSandboxPorts(ctx, sbx.ID)
+		if err := s.sbxRepo.ReleaseSandboxPorts(ctx, sbx.ID); err != nil {
+			slog.Warn("release sandbox ports failed while detaching node sandbox", slog.String("node", nodeName), slog.String("sandbox", sbx.ID), slog.Any("error", err))
+		}
 
 		switch sbx.Status.Phase {
 		case types.SandboxPhaseDeleting:
@@ -104,12 +106,20 @@ func (s *Service) GetNode(ctx context.Context, name string) (*types.Node, error)
 }
 
 func (s *Service) SandboxClientForNode(ctx context.Context, name string) (*client.Client, *types.Node, error) {
+	return s.sandboxClientForNode(ctx, name, s.cfg.ProbeTimeout)
+}
+
+func (s *Service) SandboxOpClientForNode(ctx context.Context, name string) (*client.Client, *types.Node, error) {
+	return s.sandboxClientForNode(ctx, name, s.cfg.SandboxOpTimeout)
+}
+
+func (s *Service) sandboxClientForNode(ctx context.Context, name string, timeout time.Duration) (*client.Client, *types.Node, error) {
 	n, err := s.repo.GetNode(ctx, name)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	c := client.New(n.SandboxdBaseURL, s.cfg.ProbeTimeout)
+	c := client.New(n.SandboxdBaseURL, timeout)
 	return c, n, nil
 }
 

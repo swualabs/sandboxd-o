@@ -20,6 +20,7 @@ const (
 	defaultSQLitePath            = "/var/lib/sandboxd/orchestrator.db"
 	defaultHeartbeatInterval     = 10 * time.Second
 	defaultProbeTimeout          = 3 * time.Second
+	defaultSandboxOpTimeout      = 60 * time.Second
 	defaultHeartbeatParallel     = false
 	defaultHeartbeatMaxParallel  = 4
 	defaultResourceSyncInterval  = 30 * time.Second
@@ -42,6 +43,7 @@ type Config struct {
 	SQLitePath               string
 	HeartbeatInterval        time.Duration
 	ProbeTimeout             time.Duration
+	SandboxOpTimeout         time.Duration
 	HeartbeatParallel        bool
 	HeartbeatMaxParallel     int
 	ResourceSyncInterval     time.Duration
@@ -83,6 +85,7 @@ func Load() (Config, error) {
 		SQLitePath:               envutil.Get("ORCH_SQLITE_PATH", defaultSQLitePath),
 		HeartbeatInterval:        envutil.GetDuration("ORCH_HEARTBEAT_INTERVAL", defaultHeartbeatInterval),
 		ProbeTimeout:             envutil.GetDuration("ORCH_NODE_PROBE_TIMEOUT", defaultProbeTimeout),
+		SandboxOpTimeout:         envutil.GetDuration("ORCH_SANDBOX_OP_TIMEOUT", defaultSandboxOpTimeout),
 		HeartbeatParallel:        envutil.GetBool("ORCH_HEARTBEAT_PARALLEL", defaultHeartbeatParallel),
 		HeartbeatMaxParallel:     envutil.GetInt("ORCH_HEARTBEAT_MAX_PARALLEL", defaultHeartbeatMaxParallel),
 		ResourceSyncInterval:     envutil.GetDuration("ORCH_RESOURCE_SYNC_INTERVAL", defaultResourceSyncInterval),
@@ -130,6 +133,10 @@ func Load() (Config, error) {
 
 	if cfg.ReconcileInterval <= 0 {
 		cfg.ReconcileInterval = defaultReconcileInterval
+	}
+
+	if cfg.SandboxOpTimeout <= 0 {
+		cfg.SandboxOpTimeout = defaultSandboxOpTimeout
 	}
 
 	if cfg.HostPortMin < 1 {

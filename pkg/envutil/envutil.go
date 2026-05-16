@@ -1,6 +1,7 @@
 package envutil
 
 import (
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -38,6 +39,10 @@ func GetFloat64(key string, def float64) float64 {
 
 	f, err := strconv.ParseFloat(v, 64)
 	if err != nil {
+		return def
+	}
+
+	if math.IsNaN(f) || math.IsInf(f, 0) {
 		return def
 	}
 

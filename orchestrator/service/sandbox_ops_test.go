@@ -420,6 +420,17 @@ func TestCreateSandboxValidationAndHostPortRangeFailure(t *testing.T) {
 	if got.Status.Phase != types.SandboxPhaseFailed {
 		t.Fatalf("expected failed for out-of-range hostport, got=%s", got.Status.Phase)
 	}
+
+	_, err = s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
+		ID: "bad-ttl",
+		Spec: types.SandboxSpec{
+			TTLSeconds: -1,
+			Containers: []types.SandboxContainerSpec{{Name: "c", Image: "nginx", Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"}}},
+		},
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected invalid ttl input, got=%v", err)
+	}
 }
 
 func TestDeleteNode_MarksScheduledOrRunningSandboxFailed(t *testing.T) {

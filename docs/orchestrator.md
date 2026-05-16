@@ -223,10 +223,10 @@ Create a control-plane sandbox object for scheduling and reconciliation.
     "id": "sbx-demo-1",
     "spec": {
         "egress": true,
-        "ttlSeconds": 3600,
+        "ttl_seconds": 3600,
         "ports": [
             {
-                "containerPort": 80,
+                "container_port": 80,
                 "protocol": "tcp"
             }
         ],
@@ -236,7 +236,7 @@ Create a control-plane sandbox object for scheduling and reconciliation.
                 "image": "nginx:latest",
                 "args": [],
                 "env": [],
-                "workDir": "",
+                "work_dir": "",
                 "resource": {
                     "cpu": "200m",
                     "memory": "256Mi"
@@ -255,10 +255,10 @@ Create a control-plane sandbox object for scheduling and reconciliation.
         "id": "sbx-demo-1",
         "spec": {
             "egress": true,
-            "ttlSeconds": 3600,
+            "ttl_seconds": 3600,
             "ports": [
                 {
-                    "containerPort": 80,
+                    "container_port": 80,
                     "protocol": "tcp"
                 }
             ],
@@ -275,7 +275,7 @@ Create a control-plane sandbox object for scheduling and reconciliation.
         },
         "status": {
             "phase": "Pending",
-            "expireAt": "2026-05-15T05:31:30Z"
+            "expire_at": "2026-05-15T05:31:30Z"
         },
         "created_at": "2026-05-15T04:31:30Z",
         "updated_at": "2026-05-15T04:31:30Z"
@@ -301,7 +301,7 @@ List all control-plane sandbox objects.
                 "egress": true,
                 "ports": [
                     {
-                        "containerPort": 80,
+                        "container_port": 80,
                         "protocol": "tcp"
                     }
                 ],
@@ -318,11 +318,11 @@ List all control-plane sandbox objects.
             },
             "status": {
                 "phase": "Running",
-                "nodeName": "node-a",
-                "assignedPorts": [
+                "node_name": "node-a",
+                "assigned_ports": [
                     {
-                        "hostPort": 10000,
-                        "containerPort": 80,
+                        "host_port": 10000,
+                        "container_port": 80,
                         "protocol": "tcp"
                     }
                 ]
@@ -350,11 +350,11 @@ Get one control-plane sandbox object.
         "id": "sbx-demo-1",
         "status": {
             "phase": "Running",
-            "nodeName": "node-a",
-            "assignedPorts": [
+            "node_name": "node-a",
+            "assigned_ports": [
                 {
-                    "hostPort": 10000,
-                    "containerPort": 80,
+                    "host_port": 10000,
+                    "container_port": 80,
                     "protocol": "tcp"
                 }
             ]
@@ -445,8 +445,8 @@ Create sandbox directly on selected node (sandboxd API pass-through).
     "egress": true,
     "ports": [
         {
-            "hostPort": 30080,
-            "containerPort": 80,
+            "host_port": 30080,
+            "container_port": 80,
             "protocol": "tcp"
         }
     ],
@@ -544,15 +544,23 @@ Trigger sandboxd reconcile on selected node.
 - `Failed`: scheduling/runtime operation failed
 - `Deleting`: delete flow in progress
 
-### Sandbox `status.assignedPorts`
+### Sandbox `status.assigned_ports`
 
 Resolved host port mapping used by scheduler and runtime provisioning:
 
-- `hostPort`: selected host-side port (dynamic if `0` requested)
-- `containerPort`: target container port
+- `host_port`: selected host-side port (dynamic if `0` requested)
+- `container_port`: target container port
 - `protocol`: `tcp` or `udp`
 
 ## Environment Variables
+
+- `ORCH_NODE_PROBE_TIMEOUT`  
+  Timeout for lightweight node liveness/resource probes.  
+  Default: `3s`
+
+- `ORCH_SANDBOX_OP_TIMEOUT`  
+  Timeout for sandbox lifecycle/proxy operations (`create/get/list/delete/logs/reconcile`).  
+  Default: `60s`
 
 - `ORCH_CREATE_RPS`  
   Create-sandbox API token refill rate (requests per second).  

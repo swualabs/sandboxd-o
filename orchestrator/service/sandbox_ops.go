@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -77,7 +78,7 @@ func (s *Service) DeleteSandbox(ctx context.Context, id string) error {
 
 func (s *Service) finalizeSandboxDelete(ctx context.Context, sbx types.Sandbox) error {
 	if sbx.Status.NodeName != "" {
-		client, _, err := s.SandboxClientForNode(ctx, sbx.Status.NodeName)
+		client, _, err := s.SandboxOpClientForNode(ctx, sbx.Status.NodeName)
 		if err != nil {
 			// Node may be removed dynamically; still allow control-plane cleanup.
 			if !errors.Is(err, sql.ErrNoRows) {
@@ -96,7 +97,12 @@ func (s *Service) finalizeSandboxDelete(ctx context.Context, sbx types.Sandbox) 
 		}
 	}
 
-	_ = s.sbxRepo.ReleaseSandboxPorts(ctx, sbx.ID)
+	if err := s.sbxRepo.ReleaseSandboxPorts(ctx, sbx.ID); err != nil {
+		sbx.Status.LastError = err.Error()
+		_ = s.sbxRepo.UpdateSandboxStatus(ctx, sbx.ID, sbx.Status)
+		return err
+	}
+
 	return s.sbxRepo.DeleteSandbox(ctx, sbx.ID)
 }
 
@@ -107,6 +113,10 @@ func validateSandboxCreate(req types.CreateSandboxObjectRequest) error {
 
 	if len(req.Spec.Containers) == 0 {
 		return fmt.Errorf("%w: at least one container is required", ErrInvalidInput)
+	}
+
+	if req.Spec.TTLSeconds < 0 {
+		return fmt.Errorf("%w: ttl_seconds must be >= 0", ErrInvalidInput)
 	}
 
 	for _, c := range req.Spec.Containers {
@@ -152,6 +162,7 @@ func validateSandboxCreate(req types.CreateSandboxObjectRequest) error {
 func (s *Service) runSchedulerOnce(ctx context.Context) {
 	sandboxes, err := s.sbxRepo.ListSandboxes(ctx)
 	if err != nil {
+		slog.Warn("scheduler list sandboxes failed", slog.Any("error", err))
 		return
 	}
 
@@ -166,6 +177,7 @@ func (s *Service) runSchedulerOnce(ctx context.Context) {
 func (s *Service) scheduleOne(ctx context.Context, sbx types.Sandbox) {
 	nodes, err := s.repo.ListNodes(ctx)
 	if err != nil {
+		slog.Warn("scheduler list nodes failed", slog.String("sandbox", sbx.ID), slog.Any("error", err))
 		return
 	}
 
@@ -232,6 +244,7 @@ func (s *Service) scheduleOne(ctx context.Context, sbx types.Sandbox) {
 
 	fresh, err := s.sbxRepo.GetSandbox(ctx, sbx.ID)
 	if err != nil {
+		slog.Warn("scheduler reload sandbox failed", slog.String("sandbox", sbx.ID), slog.Any("error", err))
 		return
 	}
 
@@ -239,7 +252,9 @@ func (s *Service) scheduleOne(ctx context.Context, sbx types.Sandbox) {
 		fresh.Status.Phase = types.SandboxPhaseFailed
 		fresh.Status.LastError = err.Error()
 		_ = s.sbxRepo.UpdateSandboxStatus(ctx, fresh.ID, fresh.Status)
-		_ = s.sbxRepo.ReleaseSandboxPorts(ctx, fresh.ID)
+		if relErr := s.sbxRepo.ReleaseSandboxPorts(ctx, fresh.ID); relErr != nil {
+			slog.Warn("release sandbox ports failed after create failure", slog.String("sandbox", fresh.ID), slog.Any("error", relErr))
+		}
 		return
 	}
 
@@ -249,7 +264,7 @@ func (s *Service) scheduleOne(ctx context.Context, sbx types.Sandbox) {
 }
 
 func (s *Service) createSandboxOnNode(ctx context.Context, sbx types.Sandbox) error {
-	client, _, err := s.SandboxClientForNode(ctx, sbx.Status.NodeName)
+	client, _, err := s.SandboxOpClientForNode(ctx, sbx.Status.NodeName)
 	if err != nil {
 		return err
 	}
@@ -365,13 +380,16 @@ func allocateHostPorts(spec []types.SandboxPortSpec, used map[int]struct{}, minP
 func (s *Service) runSandboxReconcileOnce(ctx context.Context) {
 	sandboxes, err := s.sbxRepo.ListSandboxes(ctx)
 	if err != nil {
+		slog.Warn("reconcile list sandboxes failed", slog.Any("error", err))
 		return
 	}
 
 	now := time.Now().UTC()
 	for _, sbx := range sandboxes {
 		if sbx.Status.Phase == types.SandboxPhaseDeleting {
-			_ = s.finalizeSandboxDelete(ctx, sbx)
+			if err := s.finalizeSandboxDelete(ctx, sbx); err != nil {
+				slog.Warn("reconcile finalize delete failed", slog.String("sandbox", sbx.ID), slog.Any("error", err))
+			}
 			continue
 		}
 
@@ -379,7 +397,9 @@ func (s *Service) runSandboxReconcileOnce(ctx context.Context) {
 			sbx.Status.Phase = types.SandboxPhaseDeleting
 			sbx.Status.LastError = "ttl expired"
 			_ = s.sbxRepo.UpdateSandboxStatus(ctx, sbx.ID, sbx.Status)
-			_ = s.finalizeSandboxDelete(ctx, sbx)
+			if err := s.finalizeSandboxDelete(ctx, sbx); err != nil {
+				slog.Warn("reconcile ttl delete failed", slog.String("sandbox", sbx.ID), slog.Any("error", err))
+			}
 		}
 	}
 }

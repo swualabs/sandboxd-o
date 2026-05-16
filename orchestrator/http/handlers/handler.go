@@ -204,7 +204,7 @@ func (h *Handler) HeartbeatNode(c *gin.Context) {
 // @Failure 502 {object} ErrorResponse
 // @Router /api/v1/nodes/{name}/sandboxes [get]
 func (h *Handler) NodeListSandboxes(c *gin.Context) {
-	client, _, err := h.svc.SandboxClientForNode(c.Request.Context(), c.Param("name"))
+	client, _, err := h.svc.SandboxOpClientForNode(c.Request.Context(), c.Param("name"))
 	if err != nil {
 		respondNodeErr(c, err)
 		return
@@ -227,7 +227,7 @@ func (h *Handler) NodeListSandboxes(c *gin.Context) {
 // @Failure 502 {object} ErrorResponse
 // @Router /api/v1/nodes/{name}/sandboxes/{id} [get]
 func (h *Handler) NodeGetSandbox(c *gin.Context) {
-	client, _, err := h.svc.SandboxClientForNode(c.Request.Context(), c.Param("name"))
+	client, _, err := h.svc.SandboxOpClientForNode(c.Request.Context(), c.Param("name"))
 	if err != nil {
 		respondNodeErr(c, err)
 		return
@@ -251,7 +251,7 @@ func (h *Handler) NodeGetSandbox(c *gin.Context) {
 // @Failure 502 {object} ErrorResponse
 // @Router /api/v1/nodes/{name}/sandboxes [post]
 func (h *Handler) NodeCreateSandbox(c *gin.Context) {
-	client, _, err := h.svc.SandboxClientForNode(c.Request.Context(), c.Param("name"))
+	client, _, err := h.svc.SandboxOpClientForNode(c.Request.Context(), c.Param("name"))
 	if err != nil {
 		respondNodeErr(c, err)
 		return
@@ -279,7 +279,7 @@ func (h *Handler) NodeCreateSandbox(c *gin.Context) {
 // @Failure 502 {object} ErrorResponse
 // @Router /api/v1/nodes/{name}/sandboxes/{id} [delete]
 func (h *Handler) NodeDeleteSandbox(c *gin.Context) {
-	client, _, err := h.svc.SandboxClientForNode(c.Request.Context(), c.Param("name"))
+	client, _, err := h.svc.SandboxOpClientForNode(c.Request.Context(), c.Param("name"))
 	if err != nil {
 		respondNodeErr(c, err)
 		return
@@ -304,7 +304,7 @@ func (h *Handler) NodeDeleteSandbox(c *gin.Context) {
 // @Failure 502 {object} ErrorResponse
 // @Router /api/v1/nodes/{name}/sandboxes/{id}/containers/{container}/logs [get]
 func (h *Handler) NodeContainerLogs(c *gin.Context) {
-	client, _, err := h.svc.SandboxClientForNode(c.Request.Context(), c.Param("name"))
+	client, _, err := h.svc.SandboxOpClientForNode(c.Request.Context(), c.Param("name"))
 	if err != nil {
 		respondNodeErr(c, err)
 		return
@@ -326,7 +326,7 @@ func (h *Handler) NodeContainerLogs(c *gin.Context) {
 // @Failure 502 {object} ErrorResponse
 // @Router /api/v1/nodes/{name}/reconcile [post]
 func (h *Handler) NodeReconcile(c *gin.Context) {
-	client, _, err := h.svc.SandboxClientForNode(c.Request.Context(), c.Param("name"))
+	client, _, err := h.svc.SandboxOpClientForNode(c.Request.Context(), c.Param("name"))
 	if err != nil {
 		respondNodeErr(c, err)
 		return

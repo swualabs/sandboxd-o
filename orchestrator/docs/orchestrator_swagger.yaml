@@ -75,7 +75,7 @@ definitions:
         type: string
       resource:
         $ref: '#/definitions/model.ResourceSpec'
-      workDir:
+      work_dir:
         type: string
     type: object
   model.CreateSandboxRequest:
@@ -95,9 +95,9 @@ definitions:
     type: object
   model.PortMapping:
     properties:
-      containerPort:
+      container_port:
         type: integer
-      hostPort:
+      host_port:
         type: integer
       protocol:
         type: string
@@ -218,7 +218,7 @@ definitions:
         type: string
       resource:
         $ref: '#/definitions/types.SandboxResource'
-      workDir:
+      work_dir:
         type: string
     type: object
   types.SandboxPhase:
@@ -237,18 +237,18 @@ definitions:
     - SandboxPhaseDeleting
   types.SandboxPortAssign:
     properties:
-      containerPort:
+      container_port:
         type: integer
-      hostPort:
+      host_port:
         type: integer
       protocol:
         type: string
     type: object
   types.SandboxPortSpec:
     properties:
-      containerPort:
+      container_port:
         type: integer
-      hostPort:
+      host_port:
         type: integer
       protocol:
         type: string
@@ -272,24 +272,24 @@ definitions:
         items:
           $ref: '#/definitions/types.SandboxPortSpec'
         type: array
-      ttlSeconds:
+      ttl_seconds:
         type: integer
     type: object
   types.SandboxStatus:
     properties:
-      assignedPorts:
+      assigned_ports:
         items:
           $ref: '#/definitions/types.SandboxPortAssign'
         type: array
-      expireAt:
+      expire_at:
         type: string
-      lastError:
+      last_error:
         type: string
-      nodeName:
+      node_name:
         type: string
       phase:
         $ref: '#/definitions/types.SandboxPhase'
-      sandboxdID:
+      sandboxd_id:
         type: string
     type: object
 info:

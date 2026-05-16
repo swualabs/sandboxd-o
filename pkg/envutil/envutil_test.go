@@ -38,6 +38,16 @@ func TestGetFloat64(t *testing.T) {
 	if got := GetFloat64("F", 3.0); got != 3.0 {
 		t.Fatalf("GetFloat64 default=%f", got)
 	}
+
+	t.Setenv("F", "NaN")
+	if got := GetFloat64("F", 3.0); got != 3.0 {
+		t.Fatalf("GetFloat64 NaN default=%f", got)
+	}
+
+	t.Setenv("F", "+Inf")
+	if got := GetFloat64("F", 3.0); got != 3.0 {
+		t.Fatalf("GetFloat64 +Inf default=%f", got)
+	}
 }
 
 func TestGetDuration(t *testing.T) {

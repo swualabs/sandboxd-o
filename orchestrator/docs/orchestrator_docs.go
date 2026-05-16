@@ -820,7 +820,7 @@ const docTemplateorchestrator = `{
                 "resource": {
                     "$ref": "#/definitions/model.ResourceSpec"
                 },
-                "workDir": {
+                "work_dir": {
                     "type": "string"
                 }
             }
@@ -851,10 +851,10 @@ const docTemplateorchestrator = `{
         "model.PortMapping": {
             "type": "object",
             "properties": {
-                "containerPort": {
+                "container_port": {
                     "type": "integer"
                 },
-                "hostPort": {
+                "host_port": {
                     "type": "integer"
                 },
                 "protocol": {
@@ -1037,7 +1037,7 @@ const docTemplateorchestrator = `{
                 "resource": {
                     "$ref": "#/definitions/types.SandboxResource"
                 },
-                "workDir": {
+                "work_dir": {
                     "type": "string"
                 }
             }
@@ -1062,10 +1062,10 @@ const docTemplateorchestrator = `{
         "types.SandboxPortAssign": {
             "type": "object",
             "properties": {
-                "containerPort": {
+                "container_port": {
                     "type": "integer"
                 },
-                "hostPort": {
+                "host_port": {
                     "type": "integer"
                 },
                 "protocol": {
@@ -1076,10 +1076,10 @@ const docTemplateorchestrator = `{
         "types.SandboxPortSpec": {
             "type": "object",
             "properties": {
-                "containerPort": {
+                "container_port": {
                     "type": "integer"
                 },
-                "hostPort": {
+                "host_port": {
                     "type": "integer"
                 },
                 "protocol": {
@@ -1116,7 +1116,7 @@ const docTemplateorchestrator = `{
                         "$ref": "#/definitions/types.SandboxPortSpec"
                     }
                 },
-                "ttlSeconds": {
+                "ttl_seconds": {
                     "type": "integer"
                 }
             }
@@ -1124,25 +1124,25 @@ const docTemplateorchestrator = `{
         "types.SandboxStatus": {
             "type": "object",
             "properties": {
-                "assignedPorts": {
+                "assigned_ports": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/types.SandboxPortAssign"
                     }
                 },
-                "expireAt": {
+                "expire_at": {
                     "type": "string"
                 },
-                "lastError": {
+                "last_error": {
                     "type": "string"
                 },
-                "nodeName": {
+                "node_name": {
                     "type": "string"
                 },
                 "phase": {
                     "$ref": "#/definitions/types.SandboxPhase"
                 },
-                "sandboxdID": {
+                "sandboxd_id": {
                     "type": "string"
                 }
             }
