@@ -5,8 +5,8 @@ on:
     branches: [ main ]
     paths:
       - 'cmd/**'
-      - 'orchestrator/**'
-      - 'sandboxd/**'
+      - 'sandboxd-let/**'
+      - 'sandboxd-orch/**'
       - 'pkg/**'
       - 'go.mod'
       - 'go.sum'
@@ -17,8 +17,8 @@ on:
     branches: [ main ]
     paths:
       - 'cmd/**'
-      - 'orchestrator/**'
-      - 'sandboxd/**'
+      - 'sandboxd-let/**'
+      - 'sandboxd-orch/**'
       - 'pkg/**'
       - 'go.mod'
       - 'go.sum'
