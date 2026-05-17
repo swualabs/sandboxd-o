@@ -32,7 +32,9 @@ const (
 	defaultSchedulerInterval     = 3 * time.Second
 	defaultReconcileInterval     = 5 * time.Second
 	defaultStatusSyncInterval    = 20 * time.Second
+	defaultStatusSyncTimeout     = 5 * time.Second
 	defaultStatusSyncBatchSize   = 50
+	defaultStatusSyncMaxParallel = 4
 	defaultPortMin               = 10000
 	defaultPortMax               = 32767
 	defaultCreateRPS             = 20.0
@@ -57,7 +59,9 @@ type Config struct {
 	SchedulerInterval        time.Duration
 	ReconcileInterval        time.Duration
 	StatusSyncInterval       time.Duration
+	StatusSyncTimeout        time.Duration
 	StatusSyncBatchSize      int
+	StatusSyncMaxParallel    int
 	HostPortMin              int
 	HostPortMax              int
 	CreateRPS                float64
@@ -101,7 +105,9 @@ func Load() (Config, error) {
 		SchedulerInterval:        envutil.GetDuration("ORCH_SCHEDULER_INTERVAL", defaultSchedulerInterval),
 		ReconcileInterval:        envutil.GetDuration("ORCH_RECONCILE_INTERVAL", defaultReconcileInterval),
 		StatusSyncInterval:       envutil.GetDuration("ORCH_STATUS_SYNC_INTERVAL", defaultStatusSyncInterval),
+		StatusSyncTimeout:        envutil.GetDuration("ORCH_STATUS_SYNC_TIMEOUT", defaultStatusSyncTimeout),
 		StatusSyncBatchSize:      envutil.GetInt("ORCH_STATUS_SYNC_BATCH_SIZE", defaultStatusSyncBatchSize),
+		StatusSyncMaxParallel:    envutil.GetInt("ORCH_STATUS_SYNC_MAX_PARALLEL", defaultStatusSyncMaxParallel),
 		HostPortMin:              envutil.GetInt("ORCH_HOSTPORT_MIN", defaultPortMin),
 		HostPortMax:              envutil.GetInt("ORCH_HOSTPORT_MAX", defaultPortMax),
 		CreateRPS:                envutil.GetFloat64("ORCH_CREATE_RPS", defaultCreateRPS),
@@ -145,8 +151,16 @@ func Load() (Config, error) {
 		cfg.StatusSyncInterval = defaultStatusSyncInterval
 	}
 
+	if cfg.StatusSyncTimeout <= 0 {
+		cfg.StatusSyncTimeout = defaultStatusSyncTimeout
+	}
+
 	if cfg.StatusSyncBatchSize < 1 {
 		cfg.StatusSyncBatchSize = defaultStatusSyncBatchSize
+	}
+
+	if cfg.StatusSyncMaxParallel < 1 {
+		cfg.StatusSyncMaxParallel = defaultStatusSyncMaxParallel
 	}
 
 	if cfg.SandboxOpTimeout <= 0 {

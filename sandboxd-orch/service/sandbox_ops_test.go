@@ -847,6 +847,13 @@ func TestRunSandboxStatusSyncOnce_BatchAndStatusUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	deleting := makeSandbox("sbx-del-guard")
+	deleting.Status.Phase = types.SandboxPhaseDeleting
+	deleting.Status.LastError = "manual delete in progress"
+	if err := s.sbxRepo.CreateSandbox(context.Background(), deleting); err != nil {
+		t.Fatal(err)
+	}
+
 	s.runSandboxStatusSyncOnce(context.Background())
 
 	if calls != 3 {
@@ -873,6 +880,15 @@ func TestRunSandboxStatusSyncOnce_BatchAndStatusUpdate(t *testing.T) {
 	}
 	if recovered.Status.LastError != "" {
 		t.Fatalf("sbx-recover last_error=%q", recovered.Status.LastError)
+	}
+
+	deletingAfter, _ := s.GetSandbox(context.Background(), "sbx-del-guard")
+	if deletingAfter.Status.Phase != types.SandboxPhaseDeleting {
+		t.Fatalf("sbx-del-guard phase=%s", deletingAfter.Status.Phase)
+	}
+
+	if deletingAfter.Status.LastError != "manual delete in progress" {
+		t.Fatalf("sbx-del-guard last_error=%q", deletingAfter.Status.LastError)
 	}
 }
 

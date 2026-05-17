@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"sandboxd-o/sandboxd-let/model"
@@ -541,23 +542,48 @@ func (s *Service) runSandboxStatusSyncOnce(ctx context.Context) {
 		grouped[sbx.Status.NodeName] = append(grouped[sbx.Status.NodeName], sbx)
 	}
 
-	for nodeName, sandboxes := range grouped {
-		c, _, err := s.SandboxOpClientForNode(ctx, nodeName)
-		if err != nil {
-			slog.Warn("sandbox status sync skip node client", slog.String("node", nodeName), slog.Any("error", err))
-			continue
-		}
-
-		batchSize := s.cfg.StatusSyncBatchSize
-		if batchSize < 1 {
-			batchSize = 50
-		}
-
-		for i := 0; i < len(sandboxes); i += batchSize {
-			end := min(i+batchSize, len(sandboxes))
-			s.syncNodeSandboxBatch(ctx, c, nodeName, sandboxes[i:end])
-		}
+	maxParallel := s.cfg.StatusSyncMaxParallel
+	if maxParallel < 1 {
+		maxParallel = 4
 	}
+
+	sem := make(chan struct{}, maxParallel)
+	var wg sync.WaitGroup
+
+	for nodeName, sandboxes := range grouped {
+		nodeName, sandboxes := nodeName, sandboxes
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			c, _, err := s.SandboxOpClientForNode(ctx, nodeName)
+			if err != nil {
+				slog.Warn("sandbox status sync skip node client", slog.String("node", nodeName), slog.Any("error", err))
+				return
+			}
+
+			batchSize := s.cfg.StatusSyncBatchSize
+			if batchSize < 1 {
+				batchSize = 50
+			}
+
+			for i := 0; i < len(sandboxes); i += batchSize {
+				end := min(i+batchSize, len(sandboxes))
+				syncTimeout := s.cfg.StatusSyncTimeout
+				if syncTimeout <= 0 {
+					syncTimeout = 5 * time.Second
+				}
+
+				syncCtx, cancel := context.WithTimeout(ctx, syncTimeout)
+				s.syncNodeSandboxBatch(syncCtx, c, nodeName, sandboxes[i:end])
+				cancel()
+			}
+		}()
+	}
+
+	wg.Wait()
 }
 
 func (s *Service) syncNodeSandboxBatch(ctx context.Context, c *client.Client, nodeName string, sandboxes []types.Sandbox) {
@@ -579,7 +605,16 @@ func (s *Service) syncNodeSandboxBatch(ctx context.Context, c *client.Client, no
 
 	for _, sbx := range sandboxes {
 		if _, missing := findMissing(resp.Missing, sbx.ID); missing {
-			st := sbx.Status
+			latest, err := s.sbxRepo.GetSandbox(ctx, sbx.ID)
+			if err != nil {
+				continue
+			}
+
+			if latest.Status.Phase == types.SandboxPhaseDeleting {
+				continue
+			}
+
+			st := latest.Status
 			st.Phase = types.SandboxPhaseFailed
 			st.LastError = "deleted on sbxlet node"
 			_ = s.sbxRepo.UpdateSandboxStatus(ctx, sbx.ID, st)
@@ -591,7 +626,17 @@ func (s *Service) syncNodeSandboxBatch(ctx context.Context, c *client.Client, no
 			continue
 		}
 
-		next, changed := mergeSandboxPhaseWithNodeState(sbx.Status, nodeSt)
+		latest, err := s.sbxRepo.GetSandbox(ctx, sbx.ID)
+		if err != nil {
+			continue
+		}
+
+		// Do not override destructive transitions from other workflows.
+		if latest.Status.Phase == types.SandboxPhaseDeleting {
+			continue
+		}
+
+		next, changed := mergeSandboxPhaseWithNodeState(latest.Status, nodeSt)
 		if changed {
 			_ = s.sbxRepo.UpdateSandboxStatus(ctx, sbx.ID, next)
 		}

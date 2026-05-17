@@ -100,12 +100,22 @@ func TestLoad_StatusSyncDefaultsAndOverride(t *testing.T) {
 		t.Fatalf("StatusSyncInterval=%s", cfg.StatusSyncInterval)
 	}
 
+	if cfg.StatusSyncTimeout != 5*time.Second {
+		t.Fatalf("StatusSyncTimeout=%s", cfg.StatusSyncTimeout)
+	}
+
 	if cfg.StatusSyncBatchSize != 50 {
 		t.Fatalf("StatusSyncBatchSize=%d", cfg.StatusSyncBatchSize)
 	}
 
+	if cfg.StatusSyncMaxParallel != 4 {
+		t.Fatalf("StatusSyncMaxParallel=%d", cfg.StatusSyncMaxParallel)
+	}
+
 	t.Setenv("ORCH_STATUS_SYNC_INTERVAL", "45s")
+	t.Setenv("ORCH_STATUS_SYNC_TIMEOUT", "9s")
 	t.Setenv("ORCH_STATUS_SYNC_BATCH_SIZE", "7")
+	t.Setenv("ORCH_STATUS_SYNC_MAX_PARALLEL", "3")
 	cfg, err = Load()
 	if err != nil {
 		t.Fatalf("Load err=%v", err)
@@ -117,5 +127,13 @@ func TestLoad_StatusSyncDefaultsAndOverride(t *testing.T) {
 
 	if cfg.StatusSyncBatchSize != 7 {
 		t.Fatalf("StatusSyncBatchSize override=%d", cfg.StatusSyncBatchSize)
+	}
+
+	if cfg.StatusSyncTimeout != 9*time.Second {
+		t.Fatalf("StatusSyncTimeout override=%s", cfg.StatusSyncTimeout)
+	}
+
+	if cfg.StatusSyncMaxParallel != 3 {
+		t.Fatalf("StatusSyncMaxParallel override=%d", cfg.StatusSyncMaxParallel)
 	}
 }
