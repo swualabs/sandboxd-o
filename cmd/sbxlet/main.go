@@ -31,7 +31,7 @@ func main() {
 	logger, err := logging.New(logging.Config{
 		Dir:        strings.TrimSpace(os.Getenv("SANDBOX_LOG_DIR")),
 		FilePrefix: valueOrDefault(strings.TrimSpace(os.Getenv("SANDBOX_LOG_FILE_PREFIX")), "sandboxd"),
-	}, logging.Options{Service: "sandboxd", Env: strings.TrimSpace(os.Getenv("APP_ENV")), AddSource: false})
+	}, logging.Options{Service: "sandboxd", Env: strings.TrimSpace(os.Getenv("APP_ENV")), AddSource: false, Level: slog.LevelInfo})
 	if err != nil {
 		boot := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 		boot.Error("sandboxd logging init error", slog.Any("error", err))

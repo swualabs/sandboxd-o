@@ -22,6 +22,7 @@ type Options struct {
 	Service   string
 	Env       string
 	AddSource bool
+	Level     slog.Level
 }
 
 type Logger struct {
@@ -41,6 +42,7 @@ func New(cfg Config, opts Options) (*Logger, error) {
 	}
 
 	handlerOptions := &slog.HandlerOptions{
+		Level:     opts.Level,
 		AddSource: opts.AddSource,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			switch a.Key {

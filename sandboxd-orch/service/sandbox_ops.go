@@ -103,6 +103,19 @@ func (s *Service) finalizeSandboxDelete(ctx context.Context, sbx types.Sandbox) 
 		return err
 	}
 
+	if sbx.Status.NodeName != "" {
+		nodeName := sbx.Status.NodeName
+		if err := s.sbxRepo.DeleteSandbox(ctx, sbx.ID); err != nil {
+			return err
+		}
+
+		if err := s.adjustNodeUsageForSandbox(ctx, nodeName, sbx.Spec, -1); err != nil {
+			slog.Warn("logical resource decrement failed", slog.String("sandbox", sbx.ID), slog.String("node", nodeName), slog.Any("error", err))
+		}
+
+		return nil
+	}
+
 	return s.sbxRepo.DeleteSandbox(ctx, sbx.ID)
 }
 
@@ -166,12 +179,18 @@ func (s *Service) runSchedulerOnce(ctx context.Context) {
 		return
 	}
 
+	pending := 0
+	total := len(sandboxes)
 	for _, sbx := range sandboxes {
 		if sbx.Status.Phase != types.SandboxPhasePending {
 			continue
 		}
+
+		pending++
 		s.scheduleOne(ctx, sbx)
 	}
+
+	slog.Info("scheduler tick completed", slog.Int("sandbox_total", total), slog.Int("pending_count", pending))
 }
 
 func (s *Service) scheduleOne(ctx context.Context, sbx types.Sandbox) {
@@ -221,6 +240,8 @@ func (s *Service) scheduleOne(ctx context.Context, sbx types.Sandbox) {
 		sbx.Status.Phase = types.SandboxPhaseFailed
 		sbx.Status.LastError = "no feasible node for resources/ports"
 		_ = s.sbxRepo.UpdateSandboxStatus(ctx, sbx.ID, sbx.Status)
+
+		slog.Info("scheduler sandbox failed no candidate", slog.String("sandbox", sbx.ID), slog.Int64("need_cpu_milli", needCPU), slog.Int64("need_memory_bytes", needMem))
 		return
 	}
 
@@ -234,11 +255,14 @@ func (s *Service) scheduleOne(ctx context.Context, sbx types.Sandbox) {
 		return lhs > rhs
 	})
 	chosen := cands[0]
+	slog.Info("scheduler selected node", slog.String("sandbox", sbx.ID), slog.String("node", chosen.node.Name), slog.Int("port_count", len(chosen.ports)), slog.Int64("need_cpu_milli", needCPU), slog.Int64("need_memory_bytes", needMem))
 
 	if err := s.sbxRepo.ReserveSandboxPortsAndSchedule(ctx, sbx.ID, chosen.node.Name, chosen.ports); err != nil {
 		sbx.Status.Phase = types.SandboxPhaseFailed
 		sbx.Status.LastError = err.Error()
 		_ = s.sbxRepo.UpdateSandboxStatus(ctx, sbx.ID, sbx.Status)
+
+		slog.Warn("scheduler reserve ports failed", slog.String("sandbox", sbx.ID), slog.String("node", chosen.node.Name), slog.Any("error", err))
 		return
 	}
 
@@ -255,12 +279,18 @@ func (s *Service) scheduleOne(ctx context.Context, sbx types.Sandbox) {
 		if relErr := s.sbxRepo.ReleaseSandboxPorts(ctx, fresh.ID); relErr != nil {
 			slog.Warn("release sandbox ports failed after create failure", slog.String("sandbox", fresh.ID), slog.Any("error", relErr))
 		}
+
+		slog.Warn("scheduler create sandbox on node failed", slog.String("sandbox", fresh.ID), slog.String("node", fresh.Status.NodeName), slog.Any("error", err))
 		return
 	}
 
 	fresh.Status.Phase = types.SandboxPhaseRunning
 	fresh.Status.LastError = ""
 	_ = s.sbxRepo.UpdateSandboxStatus(ctx, fresh.ID, fresh.Status)
+	if err := s.adjustNodeUsageForSandbox(ctx, fresh.Status.NodeName, fresh.Spec, 1); err != nil {
+		slog.Warn("scheduler logical resource increment failed", slog.String("sandbox", fresh.ID), slog.String("node", fresh.Status.NodeName), slog.Any("error", err))
+	}
+	slog.Info("scheduler sandbox running", slog.String("sandbox", fresh.ID), slog.String("node", fresh.Status.NodeName))
 }
 
 func (s *Service) createSandboxOnNode(ctx context.Context, sbx types.Sandbox) error {
@@ -308,6 +338,19 @@ func sandboxResourceRequest(spec types.SandboxSpec) (int64, int64, error) {
 	}
 
 	return cpuMilli, memBytes, nil
+}
+
+func (s *Service) adjustNodeUsageForSandbox(ctx context.Context, nodeName string, spec types.SandboxSpec, direction int64) error {
+	if strings.TrimSpace(nodeName) == "" || direction == 0 {
+		return nil
+	}
+
+	cpu, mem, err := sandboxResourceRequest(spec)
+	if err != nil {
+		return err
+	}
+
+	return s.repo.AdjustNodeResourceUsage(ctx, nodeName, direction*cpu, direction*mem)
 }
 
 func parseCPUMilli(raw string) (int64, error) {
@@ -385,8 +428,12 @@ func (s *Service) runSandboxReconcileOnce(ctx context.Context) {
 	}
 
 	now := time.Now().UTC()
+	deleting := 0
+	expired := 0
+	total := len(sandboxes)
 	for _, sbx := range sandboxes {
 		if sbx.Status.Phase == types.SandboxPhaseDeleting {
+			deleting++
 			if err := s.finalizeSandboxDelete(ctx, sbx); err != nil {
 				slog.Warn("reconcile finalize delete failed", slog.String("sandbox", sbx.ID), slog.Any("error", err))
 			}
@@ -394,14 +441,18 @@ func (s *Service) runSandboxReconcileOnce(ctx context.Context) {
 		}
 
 		if sbx.Status.ExpireAt != nil && now.After(*sbx.Status.ExpireAt) {
+			expired++
 			sbx.Status.Phase = types.SandboxPhaseDeleting
 			sbx.Status.LastError = "ttl expired"
+
 			_ = s.sbxRepo.UpdateSandboxStatus(ctx, sbx.ID, sbx.Status)
+			slog.Info("reconcile mark deleting by ttl", slog.String("sandbox", sbx.ID), slog.Time("expire_at", *sbx.Status.ExpireAt))
 			if err := s.finalizeSandboxDelete(ctx, sbx); err != nil {
 				slog.Warn("reconcile ttl delete failed", slog.String("sandbox", sbx.ID), slog.Any("error", err))
 			}
 		}
 	}
+	slog.Info("reconcile tick completed", slog.Int("sandbox_total", total), slog.Int("deleting_count", deleting), slog.Int("expired_count", expired))
 }
 
 func (s *Service) StartSchedulerLoop(ctx context.Context) {

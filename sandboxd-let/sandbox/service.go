@@ -105,11 +105,7 @@ func New(ctx context.Context, cfg config.Config) (*Service, error) {
 func (s *Service) Close() error { return s.cri.Close() }
 
 func (s *Service) dbg(format string, args ...any) {
-	if !s.cfg.Debug {
-		return
-	}
-
-	slog.Debug(fmt.Sprintf(format, args...))
+	slog.Info(fmt.Sprintf(format, args...))
 }
 
 func (s *Service) CreateSandbox(ctx context.Context, req model.CreateSandboxRequest) (*model.Sandbox, error) {
