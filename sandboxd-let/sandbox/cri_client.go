@@ -49,6 +49,14 @@ func (c *criClient) Close() error {
 }
 
 func (c *criClient) pullImage(ctx context.Context, image string) error {
+	// Fast-path: if the image already exists in local CRI image store,
+	// skip remote pull to avoid unnecessary registry/auth dependencies.
+	if st, err := c.image.ImageStatus(ctx, &runtimeapi.ImageStatusRequest{
+		Image: &runtimeapi.ImageSpec{Image: image},
+	}); err == nil && st.GetImage() != nil {
+		return nil
+	}
+
 	_, err := c.image.PullImage(ctx, &runtimeapi.PullImageRequest{
 		Image: &runtimeapi.ImageSpec{Image: image},
 	})

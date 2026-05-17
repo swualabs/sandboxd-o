@@ -298,7 +298,11 @@ func (s *Service) provisionSandboxSync(ctx context.Context, sbx *model.Sandbox, 
 	}
 	s.dbg("network policy applied sandbox=%s", sbx.ID)
 
-	readyCtx, readyCancel := context.WithTimeout(ctx, 18*time.Second)
+	readyTimeout := s.cfg.ContainerCreateTimeout
+	if readyTimeout <= 0 {
+		readyTimeout = config.DefaultContainerCreateTimeout
+	}
+	readyCtx, readyCancel := context.WithTimeout(ctx, readyTimeout)
 	defer readyCancel()
 	if err := s.waitSandboxReady(readyCtx, sbx); err != nil {
 		return nil, err
@@ -553,8 +557,7 @@ func ensureLocalPortFree(port int, proto string) error {
 }
 
 func (s *Service) waitSandboxReady(ctx context.Context, sbx *model.Sandbox) error {
-	deadline := time.Now().Add(config.DefaultReadyTimeout)
-	for time.Now().Before(deadline) {
+	for {
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("sandbox %s readiness canceled: %w", sbx.ID, ctx.Err())
@@ -569,7 +572,16 @@ func (s *Service) waitSandboxReady(ctx context.Context, sbx *model.Sandbox) erro
 		allRunning := true
 		for _, c := range sbx.Containers {
 			st, err := s.cri.containerStatus(ctx, c.ID)
-			if err != nil || st.State != runtimeapi.ContainerState_CONTAINER_RUNNING {
+			if err != nil {
+				allRunning = false
+				break
+			}
+
+			if st.State == runtimeapi.ContainerState_CONTAINER_EXITED || st.State == runtimeapi.ContainerState_CONTAINER_UNKNOWN {
+				return fmt.Errorf("sandbox %s container %s became %s before ready", sbx.ID, c.Name, strings.ToLower(st.State.String()))
+			}
+
+			if st.State != runtimeapi.ContainerState_CONTAINER_RUNNING {
 				allRunning = false
 				break
 			}
@@ -581,8 +593,6 @@ func (s *Service) waitSandboxReady(ctx context.Context, sbx *model.Sandbox) erro
 
 		time.Sleep(200 * time.Millisecond)
 	}
-
-	return fmt.Errorf("sandbox %s did not become ready before timeout", sbx.ID)
 }
 
 func normalizeProto(proto string) string {

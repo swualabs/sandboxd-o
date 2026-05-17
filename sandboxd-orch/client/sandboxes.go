@@ -9,6 +9,25 @@ import (
 	"sandboxd-o/sandboxd-let/model"
 )
 
+type ContainerSyncStatus struct {
+	Name       string `json:"name"`
+	Phase      string `json:"phase"`
+	Error      string `json:"error,omitempty"`
+	TaskStatus string `json:"task_status,omitempty"`
+}
+
+type SandboxSyncStatus struct {
+	ID                  string                `json:"id"`
+	Phase               string                `json:"phase"`
+	Error               string                `json:"error,omitempty"`
+	UnhealthyContainers []ContainerSyncStatus `json:"unhealthy_containers,omitempty"`
+}
+
+type SandboxStatusesResponse struct {
+	Items   []SandboxSyncStatus `json:"items"`
+	Missing []string            `json:"missing,omitempty"`
+}
+
 func (c *Client) Reconcile(ctx context.Context) (map[string]any, error) {
 	return c.do(ctx, http.MethodPost, "/v1/reconcile", nil)
 }
@@ -41,6 +60,15 @@ func (c *Client) CreateSandbox(ctx context.Context, req model.CreateSandboxReque
 
 func (c *Client) DeleteSandbox(ctx context.Context, id string) (map[string]any, error) {
 	return c.do(ctx, http.MethodDelete, "/v1/sandboxes/"+url.PathEscape(id), nil)
+}
+
+func (c *Client) SandboxStatuses(ctx context.Context, ids []string) (SandboxStatusesResponse, error) {
+	var resp SandboxStatusesResponse
+	if err := c.doInto(ctx, http.MethodPost, "/v1/sandboxes/statuses", map[string]any{"ids": ids}, &resp); err != nil {
+		return SandboxStatusesResponse{}, err
+	}
+
+	return resp, nil
 }
 
 func (c *Client) GetContainerLogs(ctx context.Context, sandboxID, containerName, cursor string, limit int) (map[string]any, error) {

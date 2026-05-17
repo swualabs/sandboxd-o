@@ -8,9 +8,11 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"sandboxd-o/sandboxd-let/model"
+	"sandboxd-o/sandboxd-orch/client"
 	"sandboxd-o/sandboxd-orch/types"
 
 	k8sresource "k8s.io/apimachinery/pkg/api/resource"
@@ -501,4 +503,239 @@ func (s *Service) TriggerSandboxReconcile(ctx context.Context, id string) error 
 	}
 
 	return s.finalizeSandboxDelete(ctx, *sbx)
+}
+
+func (s *Service) StartSandboxStatusSyncLoop(ctx context.Context) {
+	go func() {
+		t := time.NewTicker(s.cfg.StatusSyncInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				s.runSandboxStatusSyncOnce(ctx)
+			}
+		}
+	}()
+}
+
+func (s *Service) runSandboxStatusSyncOnce(ctx context.Context) {
+	items, err := s.sbxRepo.ListSandboxes(ctx)
+	if err != nil {
+		slog.Warn("sandbox status sync list failed", slog.Any("error", err))
+		return
+	}
+
+	grouped := map[string][]types.Sandbox{}
+	for _, sbx := range items {
+		if strings.TrimSpace(sbx.Status.NodeName) == "" {
+			continue
+		}
+
+		if sbx.Status.Phase != types.SandboxPhaseScheduled &&
+			sbx.Status.Phase != types.SandboxPhaseRunning &&
+			sbx.Status.Phase != types.SandboxPhaseFailed {
+			continue
+		}
+
+		grouped[sbx.Status.NodeName] = append(grouped[sbx.Status.NodeName], sbx)
+	}
+
+	maxParallel := s.cfg.StatusSyncMaxParallel
+	if maxParallel < 1 {
+		maxParallel = 4
+	}
+
+	sem := make(chan struct{}, maxParallel)
+	var wg sync.WaitGroup
+
+	for nodeName, sandboxes := range grouped {
+		sem <- struct{}{}
+		nodeName, sandboxes := nodeName, sandboxes
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			c, _, err := s.SandboxOpClientForNode(ctx, nodeName)
+			if err != nil {
+				slog.Warn("sandbox status sync skip node client", slog.String("node", nodeName), slog.Any("error", err))
+				return
+			}
+
+			batchSize := s.cfg.StatusSyncBatchSize
+			if batchSize < 1 {
+				batchSize = 50
+			}
+
+			for i := 0; i < len(sandboxes); i += batchSize {
+				end := min(i+batchSize, len(sandboxes))
+				syncTimeout := s.cfg.StatusSyncTimeout
+				if syncTimeout <= 0 {
+					syncTimeout = 5 * time.Second
+				}
+
+				syncCtx, cancel := context.WithTimeout(ctx, syncTimeout)
+				s.syncNodeSandboxBatch(syncCtx, c, nodeName, sandboxes[i:end])
+				cancel()
+			}
+		}()
+	}
+
+	wg.Wait()
+}
+
+func (s *Service) syncNodeSandboxBatch(ctx context.Context, c *client.Client, nodeName string, sandboxes []types.Sandbox) {
+	ids := make([]string, 0, len(sandboxes))
+	for _, sbx := range sandboxes {
+		ids = append(ids, sbx.ID)
+	}
+
+	resp, err := c.SandboxStatuses(ctx, ids)
+	if err != nil {
+		slog.Warn("sandbox status sync request failed", slog.String("node", nodeName), slog.Any("error", err))
+		return
+	}
+
+	byID := make(map[string]client.SandboxSyncStatus, len(resp.Items))
+	for _, it := range resp.Items {
+		byID[it.ID] = it
+	}
+
+	for _, sbx := range sandboxes {
+		if findMissing(resp.Missing, sbx.ID) {
+			latest, err := s.sbxRepo.GetSandbox(ctx, sbx.ID)
+			if err != nil {
+				continue
+			}
+
+			if latest.Status.Phase == types.SandboxPhaseDeleting {
+				continue
+			}
+
+			// Scheduled sandboxes may not exist on sbxlet yet during create window.
+			if latest.Status.Phase == types.SandboxPhaseScheduled {
+				continue
+			}
+
+			st := latest.Status
+			st.Phase = types.SandboxPhaseFailed
+			st.LastError = "deleted on sbxlet node"
+			_ = s.sbxRepo.UpdateSandboxStatus(ctx, sbx.ID, st)
+			continue
+		}
+
+		nodeSt, ok := byID[sbx.ID]
+		if !ok {
+			continue
+		}
+
+		latest, err := s.sbxRepo.GetSandbox(ctx, sbx.ID)
+		if err != nil {
+			continue
+		}
+
+		// Do not override destructive transitions from other workflows.
+		if latest.Status.Phase == types.SandboxPhaseDeleting {
+			continue
+		}
+
+		next, changed := mergeSandboxPhaseWithNodeState(latest.Status, nodeSt)
+		if changed {
+			_ = s.sbxRepo.UpdateSandboxStatus(ctx, sbx.ID, next)
+		}
+	}
+}
+
+func findMissing(items []string, id string) bool {
+	for i := range items {
+		if items[i] == id {
+			return true
+		}
+	}
+
+	return false
+}
+
+func mergeSandboxPhaseWithNodeState(cur types.SandboxStatus, st client.SandboxSyncStatus) (types.SandboxStatus, bool) {
+	next := cur
+	changed := false
+
+	phase := strings.TrimSpace(st.Phase)
+
+	if strings.EqualFold(phase, "error") {
+		msg := strings.TrimSpace(st.Error)
+		for _, c := range st.UnhealthyContainers {
+			if strings.TrimSpace(c.Error) != "" {
+				if msg == "" {
+					msg = "container " + c.Name + ": " + strings.TrimSpace(c.Error)
+				} else {
+					msg += "; container " + c.Name + ": " + strings.TrimSpace(c.Error)
+				}
+			}
+		}
+
+		if msg == "" {
+			msg = "sandbox error on sbxlet node"
+		}
+
+		if next.Phase != types.SandboxPhaseFailed {
+			next.Phase = types.SandboxPhaseFailed
+			changed = true
+		}
+
+		if next.LastError != msg {
+			next.LastError = msg
+			changed = true
+		}
+
+		return next, changed
+	}
+
+	for _, c := range st.UnhealthyContainers {
+		msg := strings.TrimSpace(c.Error)
+		if msg == "" {
+			msg = "container " + c.Name + " unhealthy (" + strings.TrimSpace(c.Phase) + ")"
+		} else {
+			msg = "container " + c.Name + ": " + msg
+		}
+
+		if next.Phase != types.SandboxPhaseFailed {
+			next.Phase = types.SandboxPhaseFailed
+			changed = true
+		}
+
+		if next.LastError != msg {
+			next.LastError = msg
+			changed = true
+		}
+
+		return next, changed
+	}
+
+	if strings.EqualFold(phase, "running") {
+		if next.Phase != types.SandboxPhaseRunning {
+			next.Phase = types.SandboxPhaseRunning
+			changed = true
+		}
+
+		if next.LastError != "" {
+			next.LastError = ""
+			changed = true
+		}
+
+		return next, changed
+	}
+
+	if strings.EqualFold(phase, "creating") {
+		if next.Phase == types.SandboxPhaseRunning {
+			next.Phase = types.SandboxPhaseScheduled
+			changed = true
+		}
+
+		return next, changed
+	}
+
+	return next, changed
 }
