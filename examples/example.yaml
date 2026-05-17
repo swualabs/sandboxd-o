@@ -2,7 +2,7 @@
 
 apiVersion: sandboxd.o/v1
 kind: Sandbox
-id: sbx-wordpress-demo
+id: sbx-pwntools-basic-test-v4
 spec:
   egress: true
   ttl_seconds: 3600

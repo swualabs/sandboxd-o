@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"sandboxd-o/sandboxd-let/config"
 	"sandboxd-o/sandboxd-let/model"
 	"sandboxd-o/sandboxd-let/network"
 
@@ -268,10 +267,12 @@ func (s *Service) refreshSandboxRuntimeState(ctx context.Context, sbx *model.San
 		}
 	}
 
-	inCreateGrace := sbx.Phase == SandboxPhaseCreating && time.Since(sbx.CreatedAt) < config.DefaultReadyTimeout
 	for name, st := range sbx.Containers {
 		next := s.fillContainerRuntimeState(ctx, st)
-		if inCreateGrace && next.TaskStatus == "not_found" {
+		// Placeholder IDs are initialized before CRI create/start completes.
+		// While sandbox phase is still creating, treat not_found on placeholder
+		// as transient instead of promoting to error.
+		if sbx.Phase == SandboxPhaseCreating && next.TaskStatus == "not_found" && isPlaceholderContainerID(sbx.ID, next.Name, next.ID) {
 			next.Phase = ContainerPhaseCreating
 			next.Error = ""
 			next.TaskStatus = "creating"
@@ -365,6 +366,14 @@ func normalizeImage(image string) string {
 	}
 
 	return "docker.io/library/" + image
+}
+
+func isPlaceholderContainerID(sandboxID, containerName, containerID string) bool {
+	if sandboxID == "" || containerName == "" || containerID == "" {
+		return false
+	}
+
+	return containerID == sandboxID+"-"+containerName
 }
 
 var nameserverRe = regexp.MustCompile(`^\s*nameserver\s+([0-9a-fA-F\.:]+)\s*$`)
