@@ -1,10 +1,4 @@
 nodes:
-  # - name: "sandbox-node-1"
-  #   ip: "127.0.0.1"
-  #   port: 8081
-  - name: "sbxnode1"
-    ip: "3.34.51.178"
-    port: 8081
-  - name: "sbxnode2"
-    ip: "3.38.247.70"
+  - name: "sandbox-node-1"
+    ip: "127.0.0.1"
     port: 8081
