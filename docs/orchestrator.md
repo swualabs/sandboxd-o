@@ -457,6 +457,7 @@ Create sandbox directly on selected node (sbxlet API pass-through).
     "egress": true,
     "ports": [
         {
+            "host_port": 30080,
             "container_port": 80,
             "protocol": "tcp"
         }

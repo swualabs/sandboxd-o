@@ -4,11 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"sandboxd-o/sandboxd-orch/types"
 )
+
+var ErrPortReservationConflict = errors.New("port reservation conflict")
 
 type SandboxRepo interface {
 	CreateSandbox(ctx context.Context, sbx types.Sandbox) error
@@ -105,7 +108,7 @@ func (r *SQLiteNodeRepo) ReserveSandboxPortsAndSchedule(ctx context.Context, san
 		}
 
 		if cnt > 0 {
-			return fmt.Errorf("host port already reserved on node %s: %d", nodeName, p.HostPort)
+			return fmt.Errorf("%w: host port already reserved on node %s: %d", ErrPortReservationConflict, nodeName, p.HostPort)
 		}
 	}
 
@@ -114,7 +117,7 @@ func (r *SQLiteNodeRepo) ReserveSandboxPortsAndSchedule(ctx context.Context, san
 			`INSERT INTO sandbox_ports(sandbox_id, node_name, host_port, container_port, protocol, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
 			sandboxID, nodeName, p.HostPort, p.ContainerPort, p.Protocol, time.Now().UTC().Format(time.RFC3339Nano),
 		); err != nil {
-			return err
+			return fmt.Errorf("%w: %v", ErrPortReservationConflict, err)
 		}
 	}
 

@@ -15,6 +15,7 @@ import (
 
 	"sandboxd-o/sandboxd-let/model"
 	"sandboxd-o/sandboxd-orch/client"
+	"sandboxd-o/sandboxd-orch/repo"
 	"sandboxd-o/sandboxd-orch/types"
 
 	k8sresource "k8s.io/apimachinery/pkg/api/resource"
@@ -258,7 +259,7 @@ func (s *Service) scheduleOne(ctx context.Context, sbx types.Sandbox) {
 	slog.Info("scheduler selected node", slog.String("sandbox", sbx.ID), slog.String("node", chosen.node.Name), slog.Int("port_count", len(chosen.ports)), slog.Int64("need_cpu_milli", needCPU), slog.Int64("need_memory_bytes", needMem))
 
 	if err := s.sbxRepo.ReserveSandboxPortsAndSchedule(ctx, sbx.ID, chosen.node.Name, chosen.ports); err != nil {
-		if isPortReservationConflictErr(err) {
+		if errors.Is(err, repo.ErrPortReservationConflict) {
 			slog.Info("scheduler reserve ports conflict; will retry next tick", slog.String("sandbox", sbx.ID), slog.String("node", chosen.node.Name), slog.Any("error", err))
 			return
 		}
@@ -375,23 +376,6 @@ func parseMemoryBytes(raw string) (int64, error) {
 	}
 
 	return q.Value(), nil
-}
-
-func isPortReservationConflictErr(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	if msg == "" {
-		return false
-	}
-
-	if strings.Contains(msg, "host port already reserved") {
-		return true
-	}
-
-	return strings.Contains(msg, "unique constraint failed") && strings.Contains(msg, "sandbox_ports")
 }
 
 func allocateHostPorts(spec []types.SandboxPortSpec, used map[int]struct{}, minPort, maxPort int) ([]types.SandboxPortAssign, bool) {

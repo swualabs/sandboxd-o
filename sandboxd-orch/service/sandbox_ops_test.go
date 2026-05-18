@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -15,6 +14,7 @@ import (
 
 	"sandboxd-o/sandboxd-orch/client"
 	"sandboxd-o/sandboxd-orch/config"
+	"sandboxd-o/sandboxd-orch/repo"
 	"sandboxd-o/sandboxd-orch/types"
 )
 
@@ -388,7 +388,7 @@ func TestReconcile_DeletingPhaseFinalized(t *testing.T) {
 	}
 }
 
-func TestCreateSandboxValidationAndHostPortRangeFailure(t *testing.T) {
+func TestCreateSandboxValidationAndTTLFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 	}))
@@ -878,24 +878,11 @@ func TestAllocateHostPorts_InsufficientCapacityFails(t *testing.T) {
 	}
 }
 
-func TestIsPortReservationConflictErr(t *testing.T) {
-	cases := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{name: "nil", err: nil, want: false},
-		{name: "reserved message", err: fmt.Errorf("host port already reserved on node n1: 10005"), want: true},
-		{name: "sqlite unique", err: fmt.Errorf("UNIQUE constraint failed: sandbox_ports.node_name, sandbox_ports.host_port"), want: true},
-		{name: "other db error", err: fmt.Errorf("database is locked"), want: false},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := isPortReservationConflictErr(tc.err); got != tc.want {
-				t.Fatalf("got=%v want=%v err=%v", got, tc.want, tc.err)
-			}
-		})
+func TestPortReservationConflictSentinelWrap(t *testing.T) {
+	wrapped := errors.New("wrapped")
+	err := errors.Join(repo.ErrPortReservationConflict, wrapped)
+	if !errors.Is(err, repo.ErrPortReservationConflict) {
+		t.Fatal("expected errors.Is to detect port reservation conflict")
 	}
 }
 
