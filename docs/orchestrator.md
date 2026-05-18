@@ -457,7 +457,6 @@ Create sandbox directly on selected node (sbxlet API pass-through).
     "egress": true,
     "ports": [
         {
-            "host_port": 30080,
             "container_port": 80,
             "protocol": "tcp"
         }
@@ -560,7 +559,8 @@ Trigger sbxlet reconcile on selected node.
 
 Resolved host port mapping used by scheduler and runtime provisioning:
 
-- `host_port`: selected host-side port (dynamic if `0` requested)
+- `host_port`: orchestrator-assigned host-side port (automatically selected within configured range)
+  - In `spec.ports`, client-sent `host_port` is accepted for backward compatibility but ignored.
 - `container_port`: target container port
 - `protocol`: `tcp` or `udp`
 
