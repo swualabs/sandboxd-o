@@ -14,6 +14,7 @@ import (
 
 	"sandboxd-o/sandboxd-orch/client"
 	"sandboxd-o/sandboxd-orch/config"
+	"sandboxd-o/sandboxd-orch/repo"
 	"sandboxd-o/sandboxd-orch/types"
 )
 
@@ -119,7 +120,7 @@ func TestSandboxCreateAndSchedule_DynamicPort(t *testing.T) {
 	}
 }
 
-func TestScheduler_PortConflictToFailed(t *testing.T) {
+func TestScheduler_AssignsDistinctPortsAcrossSandboxes(t *testing.T) {
 	sbxNode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.Path == "/v1/sandboxes" {
 			_ = json.NewEncoder(w).Encode(map[string]any{"sandbox": map[string]any{"id": "ok"}})
@@ -135,7 +136,7 @@ func TestScheduler_PortConflictToFailed(t *testing.T) {
 	_, _ = s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
 		ID: "sbx-1",
 		Spec: types.SandboxSpec{
-			Ports:      []types.SandboxPortSpec{{HostPort: 10005, ContainerPort: 80, Protocol: "tcp"}},
+			Ports:      []types.SandboxPortSpec{{ContainerPort: 80, Protocol: "tcp"}},
 			Containers: []types.SandboxContainerSpec{{Name: "c1", Image: "nginx", Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"}}},
 		},
 	})
@@ -144,19 +145,32 @@ func TestScheduler_PortConflictToFailed(t *testing.T) {
 	_, _ = s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
 		ID: "sbx-2",
 		Spec: types.SandboxSpec{
-			Ports:      []types.SandboxPortSpec{{HostPort: 10005, ContainerPort: 8080, Protocol: "tcp"}},
+			Ports:      []types.SandboxPortSpec{{ContainerPort: 8080, Protocol: "tcp"}},
 			Containers: []types.SandboxContainerSpec{{Name: "c2", Image: "nginx", Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"}}},
 		},
 	})
 	s.runSchedulerOnce(context.Background())
+
+	got1, err := s.GetSandbox(context.Background(), "sbx-1")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	got, err := s.GetSandbox(context.Background(), "sbx-2")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if got.Status.Phase != types.SandboxPhaseFailed {
-		t.Fatalf("phase=%s", got.Status.Phase)
+	if got1.Status.Phase != types.SandboxPhaseRunning || got.Status.Phase != types.SandboxPhaseRunning {
+		t.Fatalf("unexpected phases sbx-1=%s sbx-2=%s", got1.Status.Phase, got.Status.Phase)
+	}
+
+	if len(got1.Status.AssignedPorts) != 1 || len(got.Status.AssignedPorts) != 1 {
+		t.Fatalf("assigned ports sbx-1=%+v sbx-2=%+v", got1.Status.AssignedPorts, got.Status.AssignedPorts)
+	}
+
+	if got1.Status.AssignedPorts[0].HostPort == got.Status.AssignedPorts[0].HostPort {
+		t.Fatalf("expected distinct host ports, got same=%d", got.Status.AssignedPorts[0].HostPort)
 	}
 }
 
@@ -302,7 +316,7 @@ func TestHostPortReleasedAfterDelete(t *testing.T) {
 	_, _ = s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
 		ID: "sbx-del-1",
 		Spec: types.SandboxSpec{
-			Ports:      []types.SandboxPortSpec{{HostPort: 10006, ContainerPort: 80, Protocol: "tcp"}},
+			Ports:      []types.SandboxPortSpec{{ContainerPort: 80, Protocol: "tcp"}},
 			Containers: []types.SandboxContainerSpec{{Name: "c1", Image: "nginx", Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"}}},
 		},
 	})
@@ -315,7 +329,7 @@ func TestHostPortReleasedAfterDelete(t *testing.T) {
 	_, _ = s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
 		ID: "sbx-del-2",
 		Spec: types.SandboxSpec{
-			Ports:      []types.SandboxPortSpec{{HostPort: 10006, ContainerPort: 8080, Protocol: "tcp"}},
+			Ports:      []types.SandboxPortSpec{{ContainerPort: 8080, Protocol: "tcp"}},
 			Containers: []types.SandboxContainerSpec{{Name: "c2", Image: "nginx", Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"}}},
 		},
 	})
@@ -374,7 +388,7 @@ func TestReconcile_DeletingPhaseFinalized(t *testing.T) {
 	}
 }
 
-func TestCreateSandboxValidationAndHostPortRangeFailure(t *testing.T) {
+func TestCreateSandboxValidationAndTTLFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 	}))
@@ -401,28 +415,6 @@ func TestCreateSandboxValidationAndHostPortRangeFailure(t *testing.T) {
 	}
 
 	_, err = s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
-		ID: "bad-range",
-		Spec: types.SandboxSpec{
-			Ports:      []types.SandboxPortSpec{{HostPort: 9999, ContainerPort: 80}},
-			Containers: []types.SandboxContainerSpec{{Name: "c", Image: "nginx", Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"}}},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	s.runSchedulerOnce(context.Background())
-
-	got, err := s.GetSandbox(context.Background(), "bad-range")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if got.Status.Phase != types.SandboxPhaseFailed {
-		t.Fatalf("expected failed for out-of-range hostport, got=%s", got.Status.Phase)
-	}
-
-	_, err = s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
 		ID: "bad-ttl",
 		Spec: types.SandboxSpec{
 			TTLSeconds: -1,
@@ -431,6 +423,53 @@ func TestCreateSandboxValidationAndHostPortRangeFailure(t *testing.T) {
 	})
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("expected invalid ttl input, got=%v", err)
+	}
+}
+
+func TestCreateSandbox_HostPortInputIgnoredForCompatibility(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/sandboxes" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"sandbox": map[string]any{"id": "ok"}})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	s := newServiceWithNode(t, server)
+	defer s.Close()
+
+	_, err := s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
+		ID: "sbx-hostport-ignored",
+		Spec: types.SandboxSpec{
+			Ports: []types.SandboxPortSpec{{
+				HostPort:      1,
+				ContainerPort: 80,
+				Protocol:      "tcp",
+			}},
+			Containers: []types.SandboxContainerSpec{{Name: "c", Image: "nginx", Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"}}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.runSchedulerOnce(context.Background())
+	got, err := s.GetSandbox(context.Background(), "sbx-hostport-ignored")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Status.Phase != types.SandboxPhaseRunning {
+		t.Fatalf("phase=%s", got.Status.Phase)
+	}
+
+	if len(got.Status.AssignedPorts) != 1 {
+		t.Fatalf("assigned ports=%+v", got.Status.AssignedPorts)
+	}
+
+	if got.Status.AssignedPorts[0].HostPort < 10000 || got.Status.AssignedPorts[0].HostPort > 10010 {
+		t.Fatalf("assigned host port out of configured range: %d", got.Status.AssignedPorts[0].HostPort)
 	}
 }
 
@@ -459,7 +498,7 @@ func TestDeleteNode_MarksScheduledOrRunningSandboxFailed(t *testing.T) {
 	_, _ = s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
 		ID: "sbx-node-del",
 		Spec: types.SandboxSpec{
-			Ports:      []types.SandboxPortSpec{{HostPort: 10007, ContainerPort: 80, Protocol: "tcp"}},
+			Ports:      []types.SandboxPortSpec{{ContainerPort: 80, Protocol: "tcp"}},
 			Containers: []types.SandboxContainerSpec{{Name: "c", Image: "nginx", Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"}}},
 		},
 	})
@@ -524,7 +563,7 @@ func TestDeleteNode_ForceBehaviorOnNodeAPIFailure(t *testing.T) {
 	_, _ = s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
 		ID: "sbx-force",
 		Spec: types.SandboxSpec{
-			Ports:      []types.SandboxPortSpec{{HostPort: 10008, ContainerPort: 80, Protocol: "tcp"}},
+			Ports:      []types.SandboxPortSpec{{ContainerPort: 80, Protocol: "tcp"}},
 			Containers: []types.SandboxContainerSpec{{Name: "c", Image: "nginx", Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"}}},
 		},
 	})
@@ -622,7 +661,7 @@ func TestDeleteSandbox_WhenNodeAlreadyRemoved_CleansLocally(t *testing.T) {
 	_, _ = s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
 		ID: "sbx-gone-node",
 		Spec: types.SandboxSpec{
-			Ports:      []types.SandboxPortSpec{{HostPort: 10008, ContainerPort: 80, Protocol: "tcp"}},
+			Ports:      []types.SandboxPortSpec{{ContainerPort: 80, Protocol: "tcp"}},
 			Containers: []types.SandboxContainerSpec{{Name: "c", Image: "nginx", Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"}}},
 		},
 	})
@@ -785,6 +824,65 @@ func TestRunSandboxStatusSyncOnce_MarksMissingFailed(t *testing.T) {
 
 	if keep.Status.Phase != types.SandboxPhaseScheduled {
 		t.Fatalf("scheduled sandbox must not be failed by missing during create window, got=%s", keep.Status.Phase)
+	}
+}
+
+func TestAllocateHostPorts_AvoidsUsedAndStaysInRange(t *testing.T) {
+	spec := []types.SandboxPortSpec{
+		{ContainerPort: 80, Protocol: "tcp"},
+		{ContainerPort: 8080, Protocol: "udp"},
+		{ContainerPort: 9000},
+	}
+	used := map[int]struct{}{
+		10000: {},
+		10001: {},
+	}
+
+	got, ok := allocateHostPorts(spec, used, 10000, 10010)
+	if !ok {
+		t.Fatal("expected allocation success")
+	}
+
+	if len(got) != len(spec) {
+		t.Fatalf("assigned len=%d want=%d", len(got), len(spec))
+	}
+
+	seen := map[int]struct{}{}
+	for _, p := range got {
+		if p.HostPort < 10000 || p.HostPort > 10010 {
+			t.Fatalf("assigned out of range port=%d", p.HostPort)
+		}
+
+		if _, exists := used[p.HostPort]; exists {
+			t.Fatalf("assigned used port=%d", p.HostPort)
+		}
+
+		if _, exists := seen[p.HostPort]; exists {
+			t.Fatalf("assigned duplicate port=%d", p.HostPort)
+		}
+		seen[p.HostPort] = struct{}{}
+	}
+}
+
+func TestAllocateHostPorts_InsufficientCapacityFails(t *testing.T) {
+	spec := []types.SandboxPortSpec{
+		{ContainerPort: 80},
+		{ContainerPort: 81},
+	}
+	used := map[int]struct{}{
+		10000: {},
+	}
+
+	if _, ok := allocateHostPorts(spec, used, 10000, 10001); ok {
+		t.Fatal("expected allocation failure due to insufficient capacity")
+	}
+}
+
+func TestPortReservationConflictSentinelWrap(t *testing.T) {
+	wrapped := errors.New("wrapped")
+	err := errors.Join(repo.ErrPortReservationConflict, wrapped)
+	if !errors.Is(err, repo.ErrPortReservationConflict) {
+		t.Fatal("expected errors.Is to detect port reservation conflict")
 	}
 }
 

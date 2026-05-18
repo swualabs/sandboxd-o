@@ -560,7 +560,8 @@ Trigger sbxlet reconcile on selected node.
 
 Resolved host port mapping used by scheduler and runtime provisioning:
 
-- `host_port`: selected host-side port (dynamic if `0` requested)
+- `host_port`: orchestrator-assigned host-side port (automatically selected within configured range)
+  - In `spec.ports`, client-sent `host_port` is accepted for backward compatibility but ignored.
 - `container_port`: target container port
 - `protocol`: `tcp` or `udp`
 

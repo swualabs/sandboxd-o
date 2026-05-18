@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"slices"
 	"sort"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"sandboxd-o/sandboxd-let/model"
 	"sandboxd-o/sandboxd-orch/client"
+	"sandboxd-o/sandboxd-orch/repo"
 	"sandboxd-o/sandboxd-orch/types"
 
 	k8sresource "k8s.io/apimachinery/pkg/api/resource"
@@ -158,10 +160,6 @@ func validateSandboxCreate(req types.CreateSandboxObjectRequest) error {
 			return fmt.Errorf("%w: invalid container port", ErrInvalidInput)
 		}
 
-		if p.HostPort != 0 && (p.HostPort < 1 || p.HostPort > 65535) {
-			return fmt.Errorf("%w: invalid host port", ErrInvalidInput)
-		}
-
 		proto := strings.ToLower(strings.TrimSpace(p.Protocol))
 		if proto == "" {
 			continue
@@ -261,6 +259,11 @@ func (s *Service) scheduleOne(ctx context.Context, sbx types.Sandbox) {
 	slog.Info("scheduler selected node", slog.String("sandbox", sbx.ID), slog.String("node", chosen.node.Name), slog.Int("port_count", len(chosen.ports)), slog.Int64("need_cpu_milli", needCPU), slog.Int64("need_memory_bytes", needMem))
 
 	if err := s.sbxRepo.ReserveSandboxPortsAndSchedule(ctx, sbx.ID, chosen.node.Name, chosen.ports); err != nil {
+		if errors.Is(err, repo.ErrPortReservationConflict) {
+			slog.Info("scheduler reserve ports conflict; will retry next tick", slog.String("sandbox", sbx.ID), slog.String("node", chosen.node.Name), slog.Any("error", err))
+			return
+		}
+
 		sbx.Status.Phase = types.SandboxPhaseFailed
 		sbx.Status.LastError = err.Error()
 		_ = s.sbxRepo.UpdateSandboxStatus(ctx, sbx.ID, sbx.Status)
@@ -380,37 +383,35 @@ func allocateHostPorts(spec []types.SandboxPortSpec, used map[int]struct{}, minP
 		return nil, true
 	}
 
+	if maxPort < minPort {
+		return nil, false
+	}
+
 	assigned := make([]types.SandboxPortAssign, 0, len(spec))
-	localUsed := make(map[int]struct{}, len(used))
+	localUsed := make(map[int]struct{}, len(used)+len(spec))
 	for p := range used {
 		localUsed[p] = struct{}{}
 	}
 
-	nextDynamic := minPort
+	available := make([]int, 0, maxPort-minPort+1)
+	for hp := minPort; hp <= maxPort; hp++ {
+		if _, exists := localUsed[hp]; !exists {
+			available = append(available, hp)
+		}
+	}
+
+	if len(available) < len(spec) {
+		return nil, false
+	}
+
+	rand.Shuffle(len(available), func(i, j int) {
+		available[i], available[j] = available[j], available[i]
+	})
+
+	nextDynamic := 0
 	for _, p := range spec {
-		hp := p.HostPort
-		if hp == 0 {
-			for nextDynamic <= maxPort {
-				if _, exists := localUsed[nextDynamic]; !exists {
-					hp = nextDynamic
-					nextDynamic++
-					break
-				}
-				nextDynamic++
-			}
-
-			if hp == 0 {
-				return nil, false
-			}
-		}
-
-		if hp < minPort || hp > maxPort {
-			return nil, false
-		}
-
-		if _, exists := localUsed[hp]; exists {
-			return nil, false
-		}
+		hp := available[nextDynamic]
+		nextDynamic++
 
 		localUsed[hp] = struct{}{}
 		proto := strings.ToLower(strings.TrimSpace(p.Protocol))

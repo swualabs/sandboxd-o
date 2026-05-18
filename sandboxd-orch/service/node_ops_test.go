@@ -305,7 +305,7 @@ func TestDeleteNodeForce_SkipsNodeAPICalls(t *testing.T) {
 	_, _ = s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
 		ID: "sbx-force-node-ops",
 		Spec: types.SandboxSpec{
-			Ports:      []types.SandboxPortSpec{{HostPort: 10009, ContainerPort: 80, Protocol: "tcp"}},
+			Ports:      []types.SandboxPortSpec{{ContainerPort: 80, Protocol: "tcp"}},
 			Containers: []types.SandboxContainerSpec{{Name: "c", Image: "nginx", Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"}}},
 		},
 	})
