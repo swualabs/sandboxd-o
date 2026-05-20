@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,9 +17,21 @@ import (
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
-func (s *Service) createPodSandboxCRI(ctx context.Context, sbx *model.Sandbox) (string, string, *runtimeapi.PodSandboxConfig, error) {
+var safeCgroupNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
+
+func (s *Service) createPodSandboxCRI(ctx context.Context, sbx *model.Sandbox, reqContainers []model.CreateContainerRequest) (string, string, *runtimeapi.PodSandboxConfig, error) {
 	if podID, ok := s.findManagedPodSandboxID(ctx, sbx.ID); ok {
 		s.cri.stopAndRemovePodSandbox(ctx, podID)
+	}
+
+	podRes, err := podSandboxResourcesFromRequests(reqContainers)
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	cgroupParent, err := ensureSandboxParentCgroup(s.cfg.CgroupParent, sbx.ID, podRes)
+	if err != nil {
+		return "", "", nil, err
 	}
 
 	cfg := &runtimeapi.PodSandboxConfig{
@@ -34,7 +47,9 @@ func (s *Service) createPodSandboxCRI(ctx context.Context, sbx *model.Sandbox) (
 			"sandbox-id": sbx.ID,
 		},
 		Linux: &runtimeapi.LinuxPodSandboxConfig{
+			CgroupParent:    cgroupParent,
 			SecurityContext: &runtimeapi.LinuxSandboxSecurityContext{},
+			Resources:       podRes,
 		},
 	}
 
@@ -47,12 +62,211 @@ func (s *Service) createPodSandboxCRI(ctx context.Context, sbx *model.Sandbox) (
 		return "", "", nil, err
 	}
 
+	if err := enforceCgroupV2Limits(podID, podRes); err != nil {
+		return "", "", nil, err
+	}
+
 	status, err := s.cri.podSandboxStatus(ctx, podID)
 	if err != nil {
 		return "", "", nil, err
 	}
 
 	return podID, status.GetNetwork().GetIp(), cfg, nil
+}
+
+func ensureSandboxParentCgroup(baseParent, sandboxID string, lim *runtimeapi.LinuxContainerResources) (string, error) {
+	if lim == nil {
+		return "", fmt.Errorf("nil linux container resources for sandbox %s", sandboxID)
+	}
+
+	if err := validateSandboxIDCgroupSafe(sandboxID); err != nil {
+		return "", err
+	}
+
+	parent := strings.TrimSpace(baseParent)
+	if parent == "" {
+		parent = "/k8s.io"
+	}
+
+	if !strings.HasPrefix(parent, "/") {
+		parent = "/" + parent
+	}
+
+	parent = strings.TrimSuffix(parent, "/")
+	leaf := "sbx-" + sandboxID
+	cgroupPath := filepath.Clean(parent + "/" + leaf)
+	fsPath := filepath.Join("/sys/fs/cgroup", strings.TrimPrefix(cgroupPath, "/"))
+	if err := os.MkdirAll(fsPath, 0o755); err != nil {
+		return "", fmt.Errorf("create cgroup parent %s: %w", fsPath, err)
+	}
+
+	if lim.MemoryLimitInBytes > 0 {
+		if err := writeCgroupValue(filepath.Join(fsPath, "memory.max"), strconv.FormatInt(lim.MemoryLimitInBytes, 10)); err != nil {
+			return "", err
+		}
+	}
+
+	if lim.CpuPeriod > 0 && lim.CpuQuota > 0 {
+		if err := writeCgroupValue(filepath.Join(fsPath, "cpu.max"), fmt.Sprintf("%d %d", lim.CpuQuota, lim.CpuPeriod)); err != nil {
+			return "", err
+		}
+	}
+
+	if pidsMax, ok := lim.Unified["pids.max"]; ok && strings.TrimSpace(pidsMax) != "" {
+		if err := writeCgroupValue(filepath.Join(fsPath, "pids.max"), pidsMax); err != nil {
+			return "", err
+		}
+	}
+
+	return cgroupPath, nil
+}
+
+func podSandboxResourcesFromRequests(containers []model.CreateContainerRequest) (*runtimeapi.LinuxContainerResources, error) {
+	total := parsedResource{}
+	for _, c := range containers {
+		r, err := parseContainerResource(c.Resource)
+		if err != nil {
+			return nil, fmt.Errorf("container %s: %w", c.Name, err)
+		}
+
+		total.CPUMilli += r.CPUMilli
+		total.MemoryBytes += r.MemoryBytes
+	}
+
+	lim := parsedResourceToLimits(total)
+	return &runtimeapi.LinuxContainerResources{
+		MemoryLimitInBytes: lim.MemoryBytes,
+		CpuPeriod:          int64(lim.CPUPeriod),
+		CpuQuota:           lim.CPUQuota,
+		Unified:            map[string]string{"pids.max": fmt.Sprintf("%d", lim.PidsLimit)},
+	}, nil
+}
+
+func enforceCgroupV2Limits(id string, lim *runtimeapi.LinuxContainerResources) error {
+	if strings.TrimSpace(id) == "" {
+		return nil
+	}
+
+	if lim == nil {
+		return nil
+	}
+
+	base, err := findCgroupV2PathByID(id)
+	if err != nil {
+		return err
+	}
+	if base == "" {
+		// Best effort only when cgroup path does not exist yet.
+		return nil
+	}
+
+	if lim.MemoryLimitInBytes > 0 {
+		if err := writeCgroupValue(filepath.Join(base, "memory.max"), strconv.FormatInt(lim.MemoryLimitInBytes, 10)); err != nil {
+			return err
+		}
+	}
+
+	if lim.MemorySwapLimitInBytes > 0 {
+		if err := writeCgroupValue(filepath.Join(base, "memory.swap.max"), strconv.FormatInt(lim.MemorySwapLimitInBytes, 10)); err != nil {
+			return err
+		}
+	}
+
+	if lim.CpuPeriod > 0 && lim.CpuQuota > 0 {
+		if err := writeCgroupValue(filepath.Join(base, "cpu.max"), fmt.Sprintf("%d %d", lim.CpuQuota, lim.CpuPeriod)); err != nil {
+			return err
+		}
+	}
+
+	if pidsMax, ok := lim.Unified["pids.max"]; ok && strings.TrimSpace(pidsMax) != "" {
+		if err := writeCgroupValue(filepath.Join(base, "pids.max"), pidsMax); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func writeCgroupValue(path, value string) error {
+	v := strings.TrimSpace(value)
+	if v == "" {
+		return nil
+	}
+
+	var lastErr error
+	for i := 0; i < 10; i++ {
+		if err := os.WriteFile(path, []byte(v), 0o644); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	return fmt.Errorf("write %s=%q failed: %w", path, v, lastErr)
+}
+
+func cleanupSandboxParentCgroup(baseParent, sandboxID string) {
+	if err := validateSandboxIDCgroupSafe(sandboxID); err != nil {
+		return
+	}
+
+	parent := strings.TrimSpace(baseParent)
+	if parent == "" {
+		parent = "/k8s.io"
+	}
+
+	if !strings.HasPrefix(parent, "/") {
+		parent = "/" + parent
+	}
+
+	parent = strings.TrimSuffix(parent, "/")
+	cgroupPath := filepath.Clean(parent + "/sbx-" + sandboxID)
+	_ = os.Remove(filepath.Join("/sys/fs/cgroup", strings.TrimPrefix(cgroupPath, "/")))
+}
+
+func validateSandboxIDCgroupSafe(sandboxID string) error {
+	if strings.TrimSpace(sandboxID) == "" {
+		return fmt.Errorf("sandbox id is empty")
+	}
+
+	if strings.Contains(sandboxID, "/") || strings.Contains(sandboxID, "..") {
+		return fmt.Errorf("sandbox id %q is not a safe cgroup name", sandboxID)
+	}
+
+	if !safeCgroupNameRe.MatchString(sandboxID) {
+		return fmt.Errorf("sandbox id %q is not a safe cgroup name", sandboxID)
+	}
+
+	return nil
+}
+
+func findCgroupV2PathByID(id string) (string, error) {
+	if strings.TrimSpace(id) == "" {
+		return "", nil
+	}
+
+	direct := filepath.Join("/sys/fs/cgroup/k8s.io", id)
+	if _, err := os.Stat(direct); err == nil {
+		return direct, nil
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("stat cgroup path %s: %w", direct, err)
+	}
+
+	matches, err := filepath.Glob(filepath.Join("/sys/fs/cgroup/k8s.io", "sbx-*", id))
+	if err != nil {
+		return "", fmt.Errorf("glob cgroup path for %s: %w", id, err)
+	}
+
+	for _, p := range matches {
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		} else if !os.IsNotExist(err) {
+			return "", fmt.Errorf("stat cgroup path %s: %w", p, err)
+		}
+	}
+
+	return "", nil
 }
 
 func (s *Service) createAndStartCRIContainer(ctx context.Context, sbx *model.Sandbox, podID string, sbxCfg *runtimeapi.PodSandboxConfig, c model.CreateContainerRequest, lim model.ResourceLimits) (model.ContainerState, error) {
@@ -117,6 +331,10 @@ func (s *Service) createAndStartCRIContainer(ctx context.Context, sbx *model.San
 	}
 
 	if err := s.cri.startContainer(ctx, containerID); err != nil {
+		return model.ContainerState{}, err
+	}
+
+	if err := enforceCgroupV2Limits(containerID, ctrCfg.Linux.Resources); err != nil {
 		return model.ContainerState{}, err
 	}
 
@@ -200,6 +418,7 @@ func (s *Service) deleteSandboxRuntimeArtifacts(ctx context.Context, sbx *model.
 	s.cleanupHostPortPublish(sbx)
 	s.cleanupSandboxNetworkPolicy(sbx)
 	s.cleanupSandboxCNI(ctx, sbx.ID)
+	cleanupSandboxParentCgroup(s.cfg.CgroupParent, sbx.ID)
 	s.dbg("cleanup runtime artifacts done sandbox=%s", sbx.ID)
 
 	return nil
