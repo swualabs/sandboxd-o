@@ -22,6 +22,26 @@ preflight_checks() {
   need jq
 }
 
+enforce_supported_platform() {
+  local arch distro
+  arch="$(uname -m)"
+  if [[ "${arch}" != "x86_64" && "${arch}" != "amd64" ]]; then
+    die "this installer supports x86_64 only (got: ${arch})"
+  fi
+
+  if [[ ! -r /etc/os-release ]]; then
+    die "cannot detect distro (/etc/os-release missing); Ubuntu x86_64 only"
+  fi
+  # shellcheck source=/dev/null
+  . /etc/os-release
+  distro="${ID:-}"
+  if [[ "${distro}" != "ubuntu" ]]; then
+    die "this installer supports Ubuntu x86_64 only (got distro: ${distro:-unknown})"
+  fi
+
+  log "Platform check passed: Ubuntu x86_64"
+}
+
 detect_arch() {
   local m
   m="$(uname -m)"
@@ -210,6 +230,7 @@ ENV
 
 main() {
   preflight_checks
+  enforce_supported_platform
   detect_arch
   install_base
   install_cni

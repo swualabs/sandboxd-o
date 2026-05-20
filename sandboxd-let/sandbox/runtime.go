@@ -17,6 +17,8 @@ import (
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
+var safeCgroupNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
+
 func (s *Service) createPodSandboxCRI(ctx context.Context, sbx *model.Sandbox, reqContainers []model.CreateContainerRequest) (string, string, *runtimeapi.PodSandboxConfig, error) {
 	if podID, ok := s.findManagedPodSandboxID(ctx, sbx.ID); ok {
 		s.cri.stopAndRemovePodSandbox(ctx, podID)
@@ -77,6 +79,10 @@ func ensureSandboxParentCgroup(baseParent, sandboxID string, lim *runtimeapi.Lin
 		return "", fmt.Errorf("nil linux container resources for sandbox %s", sandboxID)
 	}
 
+	if err := validateSandboxIDCgroupSafe(sandboxID); err != nil {
+		return "", err
+	}
+
 	parent := strings.TrimSpace(baseParent)
 	if parent == "" {
 		parent = "/k8s.io"
@@ -115,27 +121,6 @@ func ensureSandboxParentCgroup(baseParent, sandboxID string, lim *runtimeapi.Lin
 	return cgroupPath, nil
 }
 
-func podSandboxResourcesFromState(sbx *model.Sandbox) (*runtimeapi.LinuxContainerResources, error) {
-	total := parsedResource{}
-	for _, c := range sbx.Containers {
-		r, err := parseContainerResource(c.Resource)
-		if err != nil {
-			return nil, fmt.Errorf("container %s: %w", c.Name, err)
-		}
-
-		total.CPUMilli += r.CPUMilli
-		total.MemoryBytes += r.MemoryBytes
-	}
-
-	lim := parsedResourceToLimits(total)
-	return &runtimeapi.LinuxContainerResources{
-		MemoryLimitInBytes: lim.MemoryBytes,
-		CpuPeriod:          int64(lim.CPUPeriod),
-		CpuQuota:           lim.CPUQuota,
-		Unified:            map[string]string{"pids.max": fmt.Sprintf("%d", lim.PidsLimit)},
-	}, nil
-}
-
 func podSandboxResourcesFromRequests(containers []model.CreateContainerRequest) (*runtimeapi.LinuxContainerResources, error) {
 	total := parsedResource{}
 	for _, c := range containers {
@@ -166,10 +151,12 @@ func enforceCgroupV2Limits(id string, lim *runtimeapi.LinuxContainerResources) e
 		return nil
 	}
 
-	base := filepath.Join("/sys/fs/cgroup/k8s.io", id)
-	if _, err := os.Stat(base); err != nil {
-		// The runtime may place cgroups under a custom parent. If the default
-		// path is missing, skip best-effort manual enforcement.
+	base, err := findCgroupV2PathByID(id)
+	if err != nil {
+		return err
+	}
+	if base == "" {
+		// Best effort only when cgroup path does not exist yet.
 		return nil
 	}
 
@@ -220,6 +207,10 @@ func writeCgroupValue(path, value string) error {
 }
 
 func cleanupSandboxParentCgroup(baseParent, sandboxID string) {
+	if err := validateSandboxIDCgroupSafe(sandboxID); err != nil {
+		return
+	}
+
 	parent := strings.TrimSpace(baseParent)
 	if parent == "" {
 		parent = "/k8s.io"
@@ -232,6 +223,50 @@ func cleanupSandboxParentCgroup(baseParent, sandboxID string) {
 	parent = strings.TrimSuffix(parent, "/")
 	cgroupPath := filepath.Clean(parent + "/sbx-" + sandboxID)
 	_ = os.Remove(filepath.Join("/sys/fs/cgroup", strings.TrimPrefix(cgroupPath, "/")))
+}
+
+func validateSandboxIDCgroupSafe(sandboxID string) error {
+	if strings.TrimSpace(sandboxID) == "" {
+		return fmt.Errorf("sandbox id is empty")
+	}
+
+	if strings.Contains(sandboxID, "/") || strings.Contains(sandboxID, "..") {
+		return fmt.Errorf("sandbox id %q is not a safe cgroup name", sandboxID)
+	}
+
+	if !safeCgroupNameRe.MatchString(sandboxID) {
+		return fmt.Errorf("sandbox id %q is not a safe cgroup name", sandboxID)
+	}
+
+	return nil
+}
+
+func findCgroupV2PathByID(id string) (string, error) {
+	if strings.TrimSpace(id) == "" {
+		return "", nil
+	}
+
+	direct := filepath.Join("/sys/fs/cgroup/k8s.io", id)
+	if _, err := os.Stat(direct); err == nil {
+		return direct, nil
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("stat cgroup path %s: %w", direct, err)
+	}
+
+	matches, err := filepath.Glob(filepath.Join("/sys/fs/cgroup/k8s.io", "sbx-*", id))
+	if err != nil {
+		return "", fmt.Errorf("glob cgroup path for %s: %w", id, err)
+	}
+
+	for _, p := range matches {
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		} else if !os.IsNotExist(err) {
+			return "", fmt.Errorf("stat cgroup path %s: %w", p, err)
+		}
+	}
+
+	return "", nil
 }
 
 func (s *Service) createAndStartCRIContainer(ctx context.Context, sbx *model.Sandbox, podID string, sbxCfg *runtimeapi.PodSandboxConfig, c model.CreateContainerRequest, lim model.ResourceLimits) (model.ContainerState, error) {
