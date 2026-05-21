@@ -53,7 +53,7 @@ func (s *Service) UpsertExternalObject(ctx context.Context, req types.CreateExte
 	}
 
 	if nodeID == "" {
-		return fmt.Errorf("%w: spec.nodeId is required", ErrInvalidInput)
+		return fmt.Errorf("%w: spec.node_id is required", ErrInvalidInput)
 	}
 
 	if external == "" {

@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,6 +14,8 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+
+var ErrExternalConflict = errors.New("external object conflict")
 
 type NodeRepo interface {
 	Close() error
@@ -438,20 +441,47 @@ func scanRowScanner(s scanner) (types.Node, error) {
 
 func (r *SQLiteNodeRepo) SetNodeExternal(ctx context.Context, externalID, nodeID, external string) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	const q = `
-INSERT INTO node_externals(external_id, node_id, external, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?)
-ON CONFLICT(node_id) DO UPDATE SET
-  external_id=excluded.external_id,
-  external=excluded.external,
-  updated_at=excluded.updated_at;
-`
-	if _, err := r.db.ExecContext(ctx, q, externalID, nodeID, external, now, now); err != nil {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var byIDNode string
+	err = tx.QueryRowContext(ctx, `SELECT node_id FROM node_externals WHERE external_id=?`, externalID).Scan(&byIDNode)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 
-	_, err := r.db.ExecContext(ctx, `UPDATE node_resources SET external=?, updated_at=? WHERE name=?`, external, now, nodeID)
-	return err
+	if byIDNode != "" && byIDNode != nodeID {
+		return fmt.Errorf("%w: external id %s already bound to node %s", ErrExternalConflict, externalID, byIDNode)
+	}
+
+	var byNodeID string
+	err = tx.QueryRowContext(ctx, `SELECT external_id FROM node_externals WHERE node_id=?`, nodeID).Scan(&byNodeID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+
+	if byNodeID != "" && byNodeID != externalID {
+		return fmt.Errorf("%w: node %s already bound to external id %s", ErrExternalConflict, nodeID, byNodeID)
+	}
+
+	if byIDNode != "" {
+		if _, err := tx.ExecContext(ctx, `UPDATE node_externals SET external=?, updated_at=? WHERE external_id=?`, external, now, externalID); err != nil {
+			return err
+		}
+	} else {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO node_externals(external_id, node_id, external, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, externalID, nodeID, external, now, now); err != nil {
+			return err
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `UPDATE node_resources SET external=?, updated_at=? WHERE name=?`, external, now, nodeID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (r *SQLiteNodeRepo) DeleteNodeExternal(ctx context.Context, nodeID string) error {
@@ -492,8 +522,16 @@ func (r *SQLiteNodeRepo) ListExternals(ctx context.Context) ([]types.External, e
 			return nil, err
 		}
 
-		ex.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
-		ex.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+		ex.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			return nil, err
+		}
+
+		ex.UpdatedAt, err = time.Parse(time.RFC3339Nano, updated)
+		if err != nil {
+			return nil, err
+		}
+
 		out = append(out, ex)
 	}
 
@@ -508,7 +546,17 @@ func (r *SQLiteNodeRepo) GetExternal(ctx context.Context, id string) (*types.Ext
 		return nil, err
 	}
 
-	ex.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
-	ex.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+	createdAt, err := time.Parse(time.RFC3339Nano, created)
+	if err != nil {
+		return nil, err
+	}
+
+	updatedAt, err := time.Parse(time.RFC3339Nano, updated)
+	if err != nil {
+		return nil, err
+	}
+
+	ex.CreatedAt = createdAt
+	ex.UpdatedAt = updatedAt
 	return &ex, nil
 }

@@ -484,8 +484,7 @@ Create sandbox directly on selected node (sbxlet API pass-through).
     "sandbox": {
         "id": "sbx-direct-1",
         "phase": "creating"
-    },
-    "external": "203.0.113.10"
+    }
 }
 ```
 
@@ -498,8 +497,7 @@ Create sandbox directly on selected node (sbxlet API pass-through).
 ```json
 {
     "id": "sbx-direct-1",
-    "phase": "deleted",
-    "external": "203.0.113.10"
+    "phase": "deleted"
 }
 ```
 
@@ -522,8 +520,7 @@ Query params:
         "lines": ["line1", "line2"],
         "next_cursor": "1234",
         "has_more": false
-    },
-    "external": "203.0.113.10"
+    }
 }
 ```
 
@@ -537,8 +534,7 @@ Trigger sbxlet reconcile on selected node.
 
 ```json
 {
-    "ok": true,
-    "external": "203.0.113.10"
+    "ok": true
 }
 ```
 

@@ -85,7 +85,7 @@ type CreateExternalObjectRequest struct {
 }
 
 type ExternalObjectSpec struct {
-	NodeID   string `json:"nodeId" yaml:"nodeId"`
+	NodeID   string `json:"node_id" yaml:"node_id"`
 	External string `json:"external" yaml:"external"`
 }
 

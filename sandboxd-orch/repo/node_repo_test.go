@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -151,6 +152,37 @@ func TestSQLiteNodeRepo_ExternalCRUD(t *testing.T) {
 
 	if err := r.DeleteExternal(ctx, "ext-1"); err == nil {
 		t.Fatal("expected not found on second delete")
+	}
+}
+
+func TestSQLiteNodeRepo_SetNodeExternal_Conflict(t *testing.T) {
+	r, err := NewSQLite(filepath.Join(t.TempDir(), "orch.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	ctx := context.Background()
+	if err := r.UpsertNode(ctx, "n1", "127.0.0.1", 8081, "api"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r.UpsertNode(ctx, "n2", "127.0.0.1", 8082, "api"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r.SetNodeExternal(ctx, "ext-1", "n1", "host1.swua.kr"); err != nil {
+		t.Fatal(err)
+	}
+
+	err = r.SetNodeExternal(ctx, "ext-2", "n1", "host2.swua.kr")
+	if !errors.Is(err, ErrExternalConflict) {
+		t.Fatalf("expected ErrExternalConflict for node binding conflict, got=%v", err)
+	}
+
+	err = r.SetNodeExternal(ctx, "ext-1", "n2", "host2.swua.kr")
+	if !errors.Is(err, ErrExternalConflict) {
+		t.Fatalf("expected ErrExternalConflict for external id conflict, got=%v", err)
 	}
 }
 

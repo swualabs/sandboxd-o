@@ -25,12 +25,6 @@ func (c *Client) GetNode(ctx context.Context, name string) (map[string]any, erro
 	return c.do(ctx, http.MethodGet, "/api/v1/nodes/"+url.PathEscape(strings.TrimSpace(name)), nil)
 }
 
-type CreateNodeObjectRequest struct {
-	ID   string `json:"id"`
-	IP   string `json:"ip"`
-	Port int    `json:"port"`
-}
-
 func (c *Client) CreateNodeObject(ctx context.Context, req map[string]any) (map[string]any, error) {
 	return c.do(ctx, http.MethodPost, "/api/v1/nodes", req)
 }

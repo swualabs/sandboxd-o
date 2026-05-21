@@ -303,41 +303,75 @@ func (s *Service) scheduleOne(ctx context.Context, sbx types.Sandbox) {
 			fresh.Status.External = "(none)"
 		}
 	}
-	if ip := s.fetchSandboxIPQuick(ctx, fresh.Status.NodeName, fresh.ID); ip != "" {
-		fresh.Status.IP = ip
-	}
 
 	fresh.Status.Phase = types.SandboxPhaseRunning
 	fresh.Status.LastError = ""
+	if ip := s.fetchSandboxIPOnce(ctx, fresh.Status.NodeName, fresh.ID); ip != "" {
+		fresh.Status.IP = ip
+	}
+
 	_ = s.sbxRepo.UpdateSandboxStatus(ctx, fresh.ID, fresh.Status)
 	if err := s.adjustNodeUsageForSandbox(ctx, fresh.Status.NodeName, fresh.Spec, 1); err != nil {
 		slog.Warn("scheduler logical resource increment failed", slog.String("sandbox", fresh.ID), slog.String("node", fresh.Status.NodeName), slog.Any("error", err))
 	}
+
+	go s.refreshSandboxIPSoon(fresh.ID, fresh.Status.NodeName)
 	slog.Info("scheduler sandbox running", slog.String("sandbox", fresh.ID), slog.String("node", fresh.Status.NodeName))
 }
 
-func (s *Service) fetchSandboxIPQuick(ctx context.Context, nodeName, sandboxID string) string {
+func (s *Service) fetchSandboxIPOnce(ctx context.Context, nodeName, sandboxID string) string {
 	c, _, err := s.SandboxOpClientForNode(ctx, nodeName)
 	if err != nil {
 		return ""
 	}
 
+	st, err := c.SandboxStatuses(ctx, []string{sandboxID})
+	if err != nil || len(st.Items) == 0 {
+		return ""
+	}
+
+	return strings.TrimSpace(st.Items[0].IP)
+}
+
+func (s *Service) refreshSandboxIPSoon(sandboxID, nodeName string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	c, _, err := s.SandboxOpClientForNode(ctx, nodeName)
+	if err != nil {
+		return
+	}
+
 	for i := 0; i < 10; i++ {
 		st, err := c.SandboxStatuses(ctx, []string{sandboxID})
 		if err != nil {
-			return ""
+			return
 		}
 
 		if len(st.Items) > 0 {
 			if ip := strings.TrimSpace(st.Items[0].IP); ip != "" {
-				return ip
+				latest, err := s.sbxRepo.GetSandbox(ctx, sandboxID)
+				if err != nil {
+					return
+				}
+
+				if latest.Status.IP == ip || latest.Status.Phase == types.SandboxPhaseDeleting {
+					return
+				}
+
+				next := latest.Status
+				next.IP = ip
+				_, _ = s.sbxRepo.UpdateSandboxStatusIfUnchanged(ctx, sandboxID, next, latest.UpdatedAt)
+				return
 			}
 		}
 
-		time.Sleep(200 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(200 * time.Millisecond):
+		}
 	}
-
-	return ""
 }
 
 func (s *Service) createSandboxOnNode(ctx context.Context, sbx types.Sandbox) error {
@@ -628,7 +662,7 @@ func (s *Service) runSandboxStatusSyncOnce(ctx context.Context) {
 }
 
 func (s *Service) syncNodeSandboxBatch(ctx context.Context, c *client.Client, nodeName string, sandboxes []types.Sandbox) {
-	nodeExternal := "(none)"
+	nodeExternal := ""
 	if n, err := s.repo.GetNode(ctx, nodeName); err == nil {
 		if ext := strings.TrimSpace(n.Resources.External); ext != "" {
 			nodeExternal = ext

@@ -54,8 +54,8 @@ func ParseManifest(raw []byte) (map[string]any, error) {
 		if m.Spec == nil {
 			return nil, fmt.Errorf("spec is required")
 		}
-		if _, ok := m.Spec["nodeId"]; !ok {
-			return nil, fmt.Errorf("spec.nodeId is required")
+		if _, ok := m.Spec["node_id"]; !ok {
+			return nil, fmt.Errorf("spec.node_id is required")
 		}
 		if _, ok := m.Spec["external"]; !ok {
 			return nil, fmt.Errorf("spec.external is required")
