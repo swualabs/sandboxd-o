@@ -1,7 +1,9 @@
-# Base Architecture
+![full architecture](./assets/full.drawio.png)
 
-![Base Architecture](./assets/gvisor-sandbox.drawio.png)
+# sbxlet Architecture
 
-# Network Model
+![sbxlet Architecture](./assets/sbxlet-architecture.drawio.png)
 
-![Network Model](./assets/sandbox-networking-model.drawio.png)
+# sbxlet Networking Model
+
+![sbxlet Networking Model](./assets/sbxlet-networking-model.drawio.png)
