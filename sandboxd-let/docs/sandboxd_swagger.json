@@ -309,7 +309,7 @@
                 "container": {
                     "type": "string"
                 },
-                "external_ip": {
+                "external": {
                     "type": "string"
                 },
                 "logs": {
@@ -323,7 +323,7 @@
         "httpserver.CreateSandboxResponse": {
             "type": "object",
             "properties": {
-                "external_ip": {
+                "external": {
                     "type": "string"
                 },
                 "sandbox": {
@@ -334,7 +334,7 @@
         "httpserver.DeleteSandboxResponse": {
             "type": "object",
             "properties": {
-                "external_ip": {
+                "external": {
                     "type": "string"
                 },
                 "id": {
@@ -356,7 +356,7 @@
         "httpserver.GetSandboxResponse": {
             "type": "object",
             "properties": {
-                "external_ip": {
+                "external": {
                     "type": "string"
                 },
                 "sandbox": {
@@ -375,7 +375,7 @@
         "httpserver.ListSandboxesResponse": {
             "type": "object",
             "properties": {
-                "external_ip": {
+                "external": {
                     "type": "string"
                 },
                 "items": {
@@ -403,7 +403,7 @@
         "httpserver.ReconcileResponse": {
             "type": "object",
             "properties": {
-                "external_ip": {
+                "external": {
                     "type": "string"
                 },
                 "ok": {

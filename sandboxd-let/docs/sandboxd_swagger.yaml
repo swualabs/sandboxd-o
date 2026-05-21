@@ -4,7 +4,7 @@ definitions:
     properties:
       container:
         type: string
-      external_ip:
+      external:
         type: string
       logs:
         $ref: '#/definitions/sandbox.LogsPage'
@@ -13,14 +13,14 @@ definitions:
     type: object
   httpserver.CreateSandboxResponse:
     properties:
-      external_ip:
+      external:
         type: string
       sandbox:
         $ref: '#/definitions/model.Sandbox'
     type: object
   httpserver.DeleteSandboxResponse:
     properties:
-      external_ip:
+      external:
         type: string
       id:
         type: string
@@ -34,7 +34,7 @@ definitions:
     type: object
   httpserver.GetSandboxResponse:
     properties:
-      external_ip:
+      external:
         type: string
       sandbox:
         $ref: '#/definitions/model.Sandbox'
@@ -46,7 +46,7 @@ definitions:
     type: object
   httpserver.ListSandboxesResponse:
     properties:
-      external_ip:
+      external:
         type: string
       items:
         items:
@@ -64,7 +64,7 @@ definitions:
     type: object
   httpserver.ReconcileResponse:
     properties:
-      external_ip:
+      external:
         type: string
       ok:
         type: boolean

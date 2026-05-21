@@ -313,7 +313,7 @@ const docTemplatesandboxd = `{
                 "container": {
                     "type": "string"
                 },
-                "external_ip": {
+                "external": {
                     "type": "string"
                 },
                 "logs": {
@@ -327,7 +327,7 @@ const docTemplatesandboxd = `{
         "httpserver.CreateSandboxResponse": {
             "type": "object",
             "properties": {
-                "external_ip": {
+                "external": {
                     "type": "string"
                 },
                 "sandbox": {
@@ -338,7 +338,7 @@ const docTemplatesandboxd = `{
         "httpserver.DeleteSandboxResponse": {
             "type": "object",
             "properties": {
-                "external_ip": {
+                "external": {
                     "type": "string"
                 },
                 "id": {
@@ -360,7 +360,7 @@ const docTemplatesandboxd = `{
         "httpserver.GetSandboxResponse": {
             "type": "object",
             "properties": {
-                "external_ip": {
+                "external": {
                     "type": "string"
                 },
                 "sandbox": {
@@ -379,7 +379,7 @@ const docTemplatesandboxd = `{
         "httpserver.ListSandboxesResponse": {
             "type": "object",
             "properties": {
-                "external_ip": {
+                "external": {
                     "type": "string"
                 },
                 "items": {
@@ -407,7 +407,7 @@ const docTemplatesandboxd = `{
         "httpserver.ReconcileResponse": {
             "type": "object",
             "properties": {
-                "external_ip": {
+                "external": {
                     "type": "string"
                 },
                 "ok": {
