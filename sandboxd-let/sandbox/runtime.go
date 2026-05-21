@@ -92,7 +92,24 @@ func ensureSandboxParentCgroup(baseParent, sandboxID string, lim *runtimeapi.Lin
 		parent = "/" + parent
 	}
 
-	parent = strings.TrimSuffix(parent, "/")
+	parent = filepath.Clean(parent)
+	if parent == "/" {
+		return "", fmt.Errorf("invalid cgroup parent %q: root is not allowed", baseParent)
+	}
+
+	parentFsPath := filepath.Clean(filepath.Join("/sys/fs/cgroup", strings.TrimPrefix(parent, "/")))
+	if !strings.HasPrefix(parentFsPath, "/sys/fs/cgroup/") {
+		return "", fmt.Errorf("invalid cgroup parent %q: escapes /sys/fs/cgroup", baseParent)
+	}
+
+	if err := os.MkdirAll(parentFsPath, 0o755); err != nil {
+		return "", fmt.Errorf("create cgroup parent %s: %w", parentFsPath, err)
+	}
+
+	if err := ensureCgroupSubtreeControllers(parentFsPath, []string{"memory", "cpu", "pids"}); err != nil {
+		return "", err
+	}
+
 	leaf := "sbx-" + sandboxID
 	cgroupPath := filepath.Clean(parent + "/" + leaf)
 	fsPath := filepath.Join("/sys/fs/cgroup", strings.TrimPrefix(cgroupPath, "/"))
@@ -119,6 +136,44 @@ func ensureSandboxParentCgroup(baseParent, sandboxID string, lim *runtimeapi.Lin
 	}
 
 	return cgroupPath, nil
+}
+
+func ensureCgroupSubtreeControllers(cgroupPath string, controllers []string) error {
+	availableRaw, err := os.ReadFile(filepath.Join(cgroupPath, "cgroup.controllers"))
+	if err != nil {
+		return fmt.Errorf("read %s/cgroup.controllers: %w", cgroupPath, err)
+	}
+
+	enabledRaw, err := os.ReadFile(filepath.Join(cgroupPath, "cgroup.subtree_control"))
+	if err != nil {
+		return fmt.Errorf("read %s/cgroup.subtree_control: %w", cgroupPath, err)
+	}
+
+	available := map[string]struct{}{}
+	for _, c := range strings.Fields(string(availableRaw)) {
+		available[c] = struct{}{}
+	}
+
+	enabled := map[string]struct{}{}
+	for _, c := range strings.Fields(string(enabledRaw)) {
+		enabled[c] = struct{}{}
+	}
+
+	for _, c := range controllers {
+		if _, ok := available[c]; !ok {
+			continue
+		}
+
+		if _, ok := enabled[c]; ok {
+			continue
+		}
+
+		if err := writeCgroupValue(filepath.Join(cgroupPath, "cgroup.subtree_control"), "+"+c); err != nil {
+			return fmt.Errorf("enable cgroup controller %q under %s: %w", c, cgroupPath, err)
+		}
+	}
+
+	return nil
 }
 
 func podSandboxResourcesFromRequests(containers []model.CreateContainerRequest) (*runtimeapi.LinuxContainerResources, error) {
