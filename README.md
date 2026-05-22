@@ -38,16 +38,12 @@
 - [Sandbox/Container State](#sandboxcontainer-state)
 - [Installation, Build and Usage](#installation-build-and-usage)
     - [Requirements](#requirements)
-    - [Build](#build)
-    - [Install Runtime Dependencies](#install-runtime-dependencies)
-    - [Start sbxlet](#start-sbxlet)
-    - [Start sbxorch](#start-sbxorch)
-    - [Register Node](#register-node)
+    - [Installation Runtime Dependencies](#installation-runtime-dependencies)
+    - [Build and Usage](#build-and-usage)
 - [Environment Variables](#environment-variables)
 - [Testing](#testing)
 - [Performance and Benchmarking](#performance-and-benchmarking)
 - [Reference](#reference)
-- [Development Roadmap](#development-roadmap)
 - [API Documentation](#api-documentation)
 - [FAQ, Troubleshooting and Best Practices](#faq-troubleshooting-and-best-practices)
 - [Contribution and Contributors](#contribution-and-contributors)
@@ -128,6 +124,8 @@ In addition, sbxlet maintains its own Reconcile Loop independently from the orch
 
 The Reconcile Loop periodically compares the actual container state with the persisted state files and, when inconsistencies are detected, updates the state files or removes containers if necessary.
 
+> [!NOTE]
+>
 > This project follows the principle that sandboxes may terminate at any time and must never be recovered. Therefore, if a sandbox has terminated or its state file no longer exists, the Reconcile Loop removes the corresponding sandbox state information.
 
 A single sbxlet instance is intended to run on a single node. Running multiple sbxlet instances against the same state storage or allowing concurrent access is not supported.
@@ -170,6 +168,8 @@ sbxorch internally maintains several Sync Loops to preserve system consistency a
 
 - **Sandbox Status Sync Loop**: Periodically retrieves sandbox status from sbxlet and stores it in the database. This allows sbxorch to track the state of each sandbox and detect failures, runtime issues in sbxlet, errors inside the sandbox, or other state changes, enabling it to take appropriate actions.
 
+> [!NOTE]
+>
 > The interval of these loops can be adjusted through environment variables, and configuring appropriate intervals is recommended for production environments.
 
 ### Scheduler/Reconcile Loops
@@ -184,6 +184,8 @@ The **Reconcile Loop** periodically compares the actual system state with the re
 
 However, following this project's principle that sandboxes may terminate at any time and must not be recovered, the Reconcile Loop is currently used only as a TTL (Time To Live)-based sandbox resource cleanup mechanism rather than performing resource restoration.
 
+> [!NOTE]
+>
 > The intervals for both of these loops can also be configured through environment variables, and appropriate values are recommended for production environments.
 
 ```json
@@ -246,6 +248,8 @@ The following objects are currently available:
 - `sandboxd.o/v1` - `External`
 - `sandboxd.o/v1` - `Sandbox`
 
+> [!NOTE]
+>
 > API groups exist for structural and compatibility purposes, but they do not currently provide any separate functionality.
 
 ## Node
@@ -319,44 +323,44 @@ apiVersion: sandboxd.o/v1
 kind: Sandbox
 id: sbx-wordpress-demo
 spec:
-  egress: true
-  ttl_seconds: 3600
-  ports:
-    - container_port: 80
-      protocol: tcp
-  containers:
-    - name: wordpress
-      image: wordpress:6.9.4-php8.3-apache
-      args:
-        - sh
-        - -c
-        - >-
-          for i in $(seq 1 90); do php -r
-          '$s=@fsockopen("127.0.0.1",3306,$e,$es,1);
-          if($s){fclose($s); exit(0);} exit(1);'
-          && break; sleep 2; done;
-          exec docker-entrypoint.sh apache2-foreground
-      env:
-        - WORDPRESS_DB_HOST=127.0.0.1:3306
-        - WORDPRESS_DB_USER=wordpress
-        - WORDPRESS_DB_PASSWORD=wordpress-pass
-        - WORDPRESS_DB_NAME=wordpress
-      work_dir: ""
-      resource:
-        cpu: 1000m
-        memory: 1024Mi
-    - name: mysql
-      image: mysql:8.4
-      args: []
-      env:
-        - MYSQL_DATABASE=wordpress
-        - MYSQL_USER=wordpress
-        - MYSQL_PASSWORD=wordpress-pass
-        - MYSQL_ROOT_PASSWORD=root-pass
-      work_dir: ""
-      resource:
-        cpu: 1000m
-        memory: 1024Mi
+    egress: true
+    ttl_seconds: 3600
+    ports:
+        - container_port: 80
+          protocol: tcp
+    containers:
+        - name: wordpress
+          image: wordpress:6.9.4-php8.3-apache
+          args:
+              - sh
+              - -c
+              - >-
+                  for i in $(seq 1 90); do php -r
+                  '$s=@fsockopen("127.0.0.1",3306,$e,$es,1);
+                  if($s){fclose($s); exit(0);} exit(1);'
+                  && break; sleep 2; done;
+                  exec docker-entrypoint.sh apache2-foreground
+          env:
+              - WORDPRESS_DB_HOST=127.0.0.1:3306
+              - WORDPRESS_DB_USER=wordpress
+              - WORDPRESS_DB_PASSWORD=wordpress-pass
+              - WORDPRESS_DB_NAME=wordpress
+          work_dir: ''
+          resource:
+              cpu: 1000m
+              memory: 1024Mi
+        - name: mysql
+          image: mysql:8.4
+          args: []
+          env:
+              - MYSQL_DATABASE=wordpress
+              - MYSQL_USER=wordpress
+              - MYSQL_PASSWORD=wordpress-pass
+              - MYSQL_ROOT_PASSWORD=root-pass
+          work_dir: ''
+          resource:
+              cpu: 1000m
+              memory: 1024Mi
 ```
 
 The description of each field is as follows.
@@ -520,13 +524,10 @@ sandbox:
 ```
 
 > [!NOTE]
-> 
+>
 > The final resource allocation of a sandbox is determined as the sum of the resources allocated to its containers. Therefore, in the example above, the sandbox is calculated to use **2 vCPUs (2000m)** and **2048Mi of memory**.
 
 # Installation, Build and Usage
-
-- x86-64 and Ubuntu only. Other environments have not been tested, and architectures other than x86-64 are not currently built.
-- Does not require KVM or a hypervisor. However, the kernel version and features required by gVisor's `runsc` runtime are still necessary.
 
 ## Requirements
 
@@ -535,27 +536,188 @@ sandbox:
 - Go 1.25.5 or later
 - Other binary versions can be checked in the install script, and all components are installed automatically.
 
+> [!NOTE]
+>
 > ARM architecture is not officially supported. It may be built and used separately, but it is not officially tested or supported.
 
 - ...and **it does not require virtualization technologies such as KVM, QEMU, or a hypervisor!** This project is built on **container technology**. While it requires the kernel version and features needed by gVisor's `runsc` runtime, it does not require separate virtualization technology.
 
+## Installation Runtime Dependencies
+
+This project requires runtime dependencies such as Containerd, CRI Plugins, and gVisor (`runsc`), and additionally requires CNI plugins to be configured.
+
+It also requires runtime environment setup such as enabling certain kernel options (`bridge-nf-call-iptables`, etc.) and registering systemd services.
+
+Additionally, the gVisor runtime shim used by this project is a custom-patched version, so the patched binary is automatically included and installed.
+
+An installation script covering these steps is provided at [scripts/install.sh](./scripts/install.sh), and runtime dependencies can be installed using that script.
+
+```shell
+chmod +x scripts/install.sh
+sudo ./scripts/install.sh
+```
+
+> [!NOTE]
+>
+> The installation script must be executed with sudo privileges, and it has been tested on x86-64 architecture and Ubuntu 24.04 LTS or later.
+
+## Build and Usage
+
+At the moment, this project can either be built directly from source or used by downloading prebuilt binaries from releases.
+
+The following example demonstrates how to clone the source code via git and build it locally.
+
+```shell
+git clone https://github.com/swualabs/sandboxd-o.git
+cd sandboxd-o
+
+cp .env.example .env
+# vi .env
+
+make build
+```
+
+After building, the `sbxlet`, `sbxorch`, and `sbxctl` binaries will be generated under the `./build` directory.
+
+You can start sbxlet and sbxorch by executing these binaries with sudo privileges.
+
+The following script demonstrates one example of running sbxlet and sbxorch in the background. (Since log files are stored under `/logs/sbxlet` and `/logs/sbxorch` respectively, it is safe to redirect the binaries' stdout/stderr to `/dev/null`.)
+
+```shell
+sudo ./build/sbxlet > /dev/null 2>&1 &
+sudo ./build/sbxorch > /dev/null 2>&1 &
+```
+
+More detailed installation and usage guides will be provided in the future.
+
 # Environment Variables
+
+Currently, the environment variables used by sbxlet, sbxorch, and sbxctl are consolidated into `.env.example` within the codebase, but the environment variables themselves are not shared across components.
+
+## sbxlet
+
+```ini
+# Common
+APP_ENV=dev # application environment, can be set to dev, staging, or prod for different logging levels and configurations
+
+# HTTP listen address for sandboxd
+HTTP_ADDR=:8081
+
+# containerd socket
+SANDBOX_CONTAINERD_ADDRESS=/run/containerd/containerd.sock # default containerd socket path, can be changed if using a custom containerd setup
+SANDBOX_RUNTIME_BINARY=runsc # gVisor runtime binary, default is runsc, can be changed if using a custom built gVisor runtime
+SANDBOX_CNI_CONF_PATH=/etc/cni/sandboxd.d/20-sbxnet.conflist # CNI configuration file path, can be changed if using a custom CNI setup
+SANDBOX_LOG_DIR=/logs/sbxlet # log directory for sbxlet, default is /logs/sbxlet
+SANDBOX_LOG_FILE_PREFIX=sandboxd # log file prefix for sbxlet, default is sandboxd
+
+# local state/lock directories
+SANDBOX_STATE_BASE_DIR=/var/lib/sandboxd/sandboxes # base directory for sandbox state files, default is /var/lib/sandboxd/sandboxes
+SANDBOX_LOCK_DIR=/var/lib/sandboxd/locks # directory for lock files, default is /var/lib/sandboxd/locks
+
+# sandbox bridge/subnet
+SANDBOX_BRIDGE_INTERFACE=sbx-br0 # bridge interface name for sandbox networking, default is sbx-br0
+SANDBOX_SUBNET_CIDR=10.89.0.0/16 # subnet CIDR for sandbox networking, default is 10.89.0.0/16
+SANDBOX_MAX_ALLOC_PERCENT=90 # maximum percentage of node resources that can be allocated to sandboxes, default is 90% (ex. if node has 4 vCPUs and 8GB memory, up to 3.6 vCPUs and 7.2GB memory can be allocated to sandboxes)
+SANDBOX_PROVISION_TIMEOUT=4m # timeout for provisioning a sandbox, including image pulling and container creation, default is 4 minutes
+SANDBOX_CONTAINER_CREATE_TIMEOUT=2m # timeout for creating a container, default is 2 minutes
+SANDBOX_IMAGE_PULL_TIMEOUT=8m # timeout for pulling an image, default is 8 minutes
+
+# Chains to hook SANDBOX-FWD jump (comma-separated)
+SANDBOX_FORWARD_HOOK_CHAINS=FORWARD,DOCKER-USER # default chains to hook iptables rules for sandbox port forwarding, can be customized as needed
+```
+
+## sbxorch
+
+```ini
+# Common
+APP_ENV=dev # application environment, can be set to dev, staging, or prod for different logging levels and configurations
+
+# Http listen address for sbxorch
+ORCH_HTTP_ADDR=:8082
+
+# Paths and files
+ORCH_CONFIG_PATH=configs/apiserver.yaml # path to the orchestrator configuration file, default is configs/apiserver.yaml
+ORCH_SQLITE_PATH=/var/lib/sandboxd/orchestrator.db # path to the SQLite database file, default is /var/lib/sandboxd/orchestrator.db
+ORCH_LOG_DIR=/logs/sbxorch # log directory for sbxorch, default is /logs/sbxorch
+ORCH_LOG_FILE_PREFIX=orchestrator # log file prefix for sbxorch, default is orchestrator
+
+# Heartbeat / node state
+ORCH_HEARTBEAT_INTERVAL=10s # interval for sending heartbeat signals to nodes, default is 10 seconds
+ORCH_NODE_PROBE_TIMEOUT=3s # timeout for probing node status during heartbeat, default is 3 seconds
+ORCH_SANDBOX_OP_TIMEOUT=60s # timeout for sandbox operations such as creation and deletion, default is 60 seconds
+ORCH_HEARTBEAT_PARALLEL=false # whether to perform heartbeat probes in parallel, default is false (sequential)
+ORCH_HEARTBEAT_MAX_PARALLEL=4 # maximum number of parallel heartbeat probes when ORCH_HEARTBEAT_PARALLEL is true, default is 4
+ORCH_READY_SUCCESS_THRESHOLD=2 # number of consecutive successful heartbeats required for a node to be considered Ready, default is 2
+ORCH_NOTREADY_FAILURE_THRESHOLD=2 # number of consecutive failed heartbeats required for a node to be considered NotReady, default is 2
+
+# Resource sync / persistence
+ORCH_RESOURCE_SYNC_INTERVAL=30s # interval for syncing node resources from sbxlet, default is 30 seconds
+ORCH_RESOURCE_PERSIST_MIN_INTERVAL=30s # minimum interval for persisting resource state to the database, default is 30 seconds
+ORCH_RESOURCE_PERSIST_MAX_INTERVAL=5m # maximum interval for persisting resource state to the database, default is 5 minutes
+
+# Scheduler / reconcile
+ORCH_SCHEDULER_INTERVAL=3s # interval for running the scheduler loop to detect and schedule pending sandboxes, default is 3 seconds
+ORCH_RECONCILE_INTERVAL=5s # interval for running the reconcile loop to detect and clean up expired sandboxes, default is 5 seconds
+ORCH_STATUS_SYNC_INTERVAL=20s # interval for syncing sandbox status from sbxlet, default is 20 seconds
+ORCH_STATUS_SYNC_TIMEOUT=5s # timeout for syncing sandbox status from sbxlet, default is 5 seconds
+ORCH_STATUS_SYNC_BATCH_SIZE=50 # number of sandboxes to sync status for in each batch during the status sync loop, default is 50
+ORCH_STATUS_SYNC_MAX_PARALLEL=4 # maximum number of parallel status sync operations when syncing sandbox status from sbxlet, default is 4
+ORCH_HOSTPORT_MIN=10000 # minimum host port number for sandbox port forwarding, default is 10000
+ORCH_HOSTPORT_MAX=32767 # maximum host port number for sandbox port forwarding, default is 32767
+
+# API create rate limit
+ORCH_CREATE_RPS=20 # rate limit for creating sandboxes through the API, default is 20 requests per second
+ORCH_CREATE_BURST=40 # burst limit for creating sandboxes through the API, default is 40 requests
+
+ORCH_SHUTDOWN_TIMEOUT=5s # timeout for graceful shutdown of the orchestrator, default is 5 seconds
+```
+
+## sbxctl
+
+```ini
+SBXCTL_SERVER=http://10.10.0.1:8082 # server address for sbxctl to connect to the sbxorch API server. This can also be specified using the --server flag when running sbxctl commands.
+```
 
 # Testing
 
+[![codecov](https://codecov.io/github/swualabs/sandboxd-o/graph/badge.svg?token=QRJHESTOX0)](https://codecov.io/github/swualabs/sandboxd-o)
+
+```shell
+make test
+# make test-cover
+```
+
+The target test coverage is at least **70%** for both overall and PATCH coverage.
+
+However, since there are components that are difficult to test—such as sbxlet—certain exceptions are defined. Please refer to [`codecov.yaml`](./codecov.yaml) for details.
+
 # Performance and Benchmarking
+
+In this section, we briefly measure the time taken at each stage of sandbox provisioning and benchmark the results against [`container-provisioner-k8s`](https://github.com/swualabs/container-provisioner-k8s), which was previously used in the [SMCTF](https://github.com/nullforu/smctf)/[N4U Wargame](https://github.com/nullforu/wargame) platform.
+
+```
+TODO
+```
 
 # Reference
 
-- https://github.com/swualabs/gvisor-shim-patched
-
-# Development Roadmap
+- [swualabs/gvisor-shim-patched](https://github.com/swualabs/gvisor-shim-patched) : This is a patched version of the gVisor shim modified to resolve issues related to cgroup resource limit enforcement. for more details, refer to commit [`041e28d`](https://github.com/swualabs/gvisor-shim-patched/commit/041e28d) in the corresponding fork repository or [swualabs/sandboxd-o PR #11](https://github.com/swualabs/sandboxd-o/pull/11).
 
 # API Documentation
+
+REST API documentation can be found in [docs/orchestrator.md](./docs/orchestrator.md) or [docs/sandboxd.md](./docs/sandboxd.md), and Swagger documentation is available at the following endpoints:
+
+- **sbxorch API Swagger Documentation**: `http://<sbxorch-address>/swagger/index.html`
+- **sbxlet API Swagger Documentation**: `http://<sbxlet-address>/swagger/index.html`
 
 # FAQ, Troubleshooting and Best Practices
 
 # Contribution and Contributors
+
+| Name          | GitHub                               | Role               |
+| ------------- | ------------------------------------ | ------------------ |
+| Kim Jun Young | [@yulmwu](https://github.com/yulmwu) | Author, Maintainer |
+| ...           | ...                                  | ...                |
 
 # MIT License
 
