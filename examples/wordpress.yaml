@@ -29,8 +29,8 @@ spec:
         - WORDPRESS_DB_NAME=wordpress
       work_dir: ""
       resource:
-        cpu: 200m
-        memory: 512Mi
+        cpu: 1000m
+        memory: 1024Mi
     - name: mysql
       image: mysql:8.4
       args: []
@@ -41,5 +41,5 @@ spec:
         - MYSQL_ROOT_PASSWORD=root-pass
       work_dir: ""
       resource:
-        cpu: 200m
-        memory: 768Mi
+        cpu: 1000m
+        memory: 1024Mi
