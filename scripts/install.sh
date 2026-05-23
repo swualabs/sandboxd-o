@@ -153,6 +153,11 @@ version = 2
 
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]
   runtime_type = "io.containerd.runsc.v1"
+  pod_annotations = ["dev.gvisor.*"]
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc.options]
+  TypeUrl = "io.containerd.runsc.v1.options"
+  ConfigPath = "/etc/containerd/runsc.toml"
 
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
   runtime_type = "io.containerd.runc.v2"
@@ -162,6 +167,11 @@ version = 2
   conf_dir = "/etc/cni/sandboxd.d"
   max_conf_num = 1
 TOML
+
+  cat <<'RUNSC' | sudo tee /etc/containerd/runsc.toml >/dev/null
+[runsc_config]
+allow-flag-override = "true"
+RUNSC
 
   sudo systemctl restart containerd
   sudo systemctl is-active containerd >/dev/null || die "containerd restart failed after runsc config"
@@ -220,10 +230,28 @@ write_runtime_env() {
     fi
     sed -i '/^SANDBOX_RUNTIME_PROFILE=/d' .env
     sed -i '/^SANDBOX_SNAPSHOTTER=/d' .env
+    if grep -q '^SANDBOX_DEFAULT_EPHEMERAL_STORAGE=' .env; then
+      sed -i 's|^SANDBOX_DEFAULT_EPHEMERAL_STORAGE=.*|SANDBOX_DEFAULT_EPHEMERAL_STORAGE=128Mi|' .env
+    else
+      echo "SANDBOX_DEFAULT_EPHEMERAL_STORAGE=128Mi" >> .env
+    fi
+    if grep -q '^SANDBOX_EPHEMERAL_ROOTFS_PERCENT=' .env; then
+      sed -i 's|^SANDBOX_EPHEMERAL_ROOTFS_PERCENT=.*|SANDBOX_EPHEMERAL_ROOTFS_PERCENT=80|' .env
+    else
+      echo "SANDBOX_EPHEMERAL_ROOTFS_PERCENT=80" >> .env
+    fi
+    if grep -q '^SANDBOX_EPHEMERAL_TMP_PERCENT=' .env; then
+      sed -i 's|^SANDBOX_EPHEMERAL_TMP_PERCENT=.*|SANDBOX_EPHEMERAL_TMP_PERCENT=20|' .env
+    else
+      echo "SANDBOX_EPHEMERAL_TMP_PERCENT=20" >> .env
+    fi
   else
     cat > .env <<ENV
 SANDBOX_CONTAINERD_ADDRESS=${runtime_addr}
 SANDBOX_CNI_CONF_PATH=${SBX_CNI_CONF_FILE}
+SANDBOX_DEFAULT_EPHEMERAL_STORAGE=128Mi
+SANDBOX_EPHEMERAL_ROOTFS_PERCENT=80
+SANDBOX_EPHEMERAL_TMP_PERCENT=20
 ENV
   fi
 }

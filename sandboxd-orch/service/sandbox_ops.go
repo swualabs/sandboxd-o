@@ -342,7 +342,7 @@ func (s *Service) refreshSandboxIPSoon(sandboxID, nodeName string) {
 		return
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		st, err := c.SandboxStatuses(ctx, []string{sandboxID})
 		if err != nil {
 			return
@@ -387,12 +387,16 @@ func (s *Service) createSandboxOnNode(ctx context.Context, sbx types.Sandbox) er
 
 	for _, c := range sbx.Spec.Containers {
 		req.Containers = append(req.Containers, model.CreateContainerRequest{
-			Name:     c.Name,
-			Image:    c.Image,
-			Args:     append([]string(nil), c.Args...),
-			Env:      append([]string(nil), c.Env...),
-			WorkDir:  c.WorkDir,
-			Resource: model.ResourceSpec{CPU: c.Resource.CPU, Memory: c.Resource.Memory},
+			Name:    c.Name,
+			Image:   c.Image,
+			Args:    append([]string(nil), c.Args...),
+			Env:     append([]string(nil), c.Env...),
+			WorkDir: c.WorkDir,
+			Resource: model.ResourceSpec{
+				CPU:              c.Resource.CPU,
+				Memory:           c.Resource.Memory,
+				EphemeralStorage: c.Resource.EphemeralStorage,
+			},
 		})
 	}
 

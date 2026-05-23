@@ -78,7 +78,8 @@ Base URL: `http://localhost:8080`
             "workDir": "",
             "resource": {
                 "cpu": "250m",
-                "memory": "256Mi"
+                "memory": "256Mi",
+                "ephemeralStorage": "96Mi"
             }
         },
         {
@@ -89,7 +90,8 @@ Base URL: `http://localhost:8080`
             "workDir": "",
             "resource": {
                 "cpu": "100m",
-                "memory": "128Mi"
+                "memory": "128Mi",
+                "ephemeralStorage": "96Mi"
             }
         }
     ]
@@ -150,7 +152,7 @@ Base URL: `http://localhost:8080`
         "cniConfPath": "/etc/cni/sandboxd.d/20-sbxnet.conflist",
         "createdAt": "2026-05-08T11:00:00Z",
         "updatedAt": "2026-05-08T11:00:00Z"
-    },
+    }
 }
 ```
 
@@ -233,7 +235,7 @@ Base URL: `http://localhost:8080`
             "updatedAt": "2026-05-08T11:00:12Z"
         }
     ],
-    "next_cursor": "sbx-http-demo",
+    "next_cursor": "sbx-http-demo"
 }
 ```
 
@@ -301,11 +303,11 @@ Base URL: `http://localhost:8080`
         "cniConfPath": "/etc/cni/sandboxd.d/20-sbxnet.conflist",
         "createdAt": "2026-05-08T11:00:00Z",
         "updatedAt": "2026-05-08T11:00:12Z"
-    },
+    }
 }
 ```
 
-### Batch Sandbox Status 
+### Batch Sandbox Status
 
 - `POST /v1/sandboxes/statuses`
 - Purpose: return minimal status for orchestrator synchronization with low payload.
@@ -376,7 +378,7 @@ Note:
         ],
         "next_cursor": "154",
         "has_more": false
-    },
+    }
 }
 ```
 
@@ -390,7 +392,7 @@ Note:
 ```json
 {
     "id": "sbx-http-demo",
-    "phase": "deleted",
+    "phase": "deleted"
 }
 ```
 
@@ -404,7 +406,7 @@ Note:
 
 ```json
 {
-    "ok": true,
+    "ok": true
 }
 ```
 
@@ -420,6 +422,14 @@ Note:
 - Binary units: `128Mi`, `1Gi`
 - Decimal units: `128M`, `1G`
 - Raw bytes as numeric string are also accepted
+
+### `containers[].resource.ephemeralStorage` (optional)
+
+- Total writable storage budget per container.
+- sbxlet splits this value into root and tmp limits:
+    - `/` writable layer: 80%
+    - `/tmp`: 20%
+- Exceeding each split limit returns `ENOSPC`.
 
 ## Common Error Response
 

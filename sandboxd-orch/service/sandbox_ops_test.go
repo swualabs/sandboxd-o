@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"sandboxd-o/sandboxd-let/model"
 	"sandboxd-o/sandboxd-orch/client"
 	"sandboxd-o/sandboxd-orch/config"
 	"sandboxd-o/sandboxd-orch/repo"
@@ -118,6 +119,55 @@ func TestSandboxCreateAndSchedule_DynamicPort(t *testing.T) {
 
 	if createCalls == 0 {
 		t.Fatal("expected sandboxd create call")
+	}
+}
+
+func TestCreateSandboxOnNode_ForwardsEphemeralStorage(t *testing.T) {
+	var captured model.CreateSandboxRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/sandboxes" {
+			defer r.Body.Close()
+			if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
+			_ = json.NewEncoder(w).Encode(map[string]any{"sandbox": map[string]any{"id": "ok"}})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	s := newServiceWithNode(t, server)
+	defer s.Close()
+
+	_, err := s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
+		ID: "sbx-ephem-forward",
+		Spec: types.SandboxSpec{
+			Containers: []types.SandboxContainerSpec{{
+				Name:  "app",
+				Image: "ubuntu:24.04",
+				Resource: types.SandboxResource{
+					CPU:              "100m",
+					Memory:           "64Mi",
+					EphemeralStorage: "96Mi",
+				},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.runSchedulerOnce(context.Background())
+
+	if len(captured.Containers) != 1 {
+		t.Fatalf("captured containers=%d", len(captured.Containers))
+	}
+
+	if got := captured.Containers[0].Resource.EphemeralStorage; got != "96Mi" {
+		t.Fatalf("ephemeralStorage=%q", got)
 	}
 }
 

@@ -112,7 +112,7 @@ func TestClient_SandboxOps(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := c.CreateSandbox(ctx, model.CreateSandboxRequest{ID: "s1", Containers: []model.CreateContainerRequest{{Name: "c", Image: "i", Resource: model.ResourceSpec{CPU: "1m", Memory: "1Mi"}}}}); err != nil {
+	if _, err := c.CreateSandbox(ctx, model.CreateSandboxRequest{ID: "s1", Containers: []model.CreateContainerRequest{{Name: "c", Image: "i", Resource: model.ResourceSpec{CPU: "1m", Memory: "1Mi", EphemeralStorage: "64Mi"}}}}); err != nil {
 		t.Fatal(err)
 	}
 

@@ -138,13 +138,13 @@ func TestHandlers_AllEndpoints(t *testing.T) {
 	must(http.MethodPost, "/nodes/n1/heartbeat", nil, 200)
 	must(http.MethodGet, "/nodes/n1/sandboxes?cursor=a&limit=10", nil, 200)
 	must(http.MethodGet, "/nodes/n1/sandboxes/s1", nil, 200)
-	must(http.MethodPost, "/nodes/n1/sandboxes", []byte(`{"id":"s1","egress":true,"containers":[{"name":"c1","image":"nginx","resource":{"cpu":"100m","memory":"64Mi"}}],"ports":[]}`), 200)
+	must(http.MethodPost, "/nodes/n1/sandboxes", []byte(`{"id":"s1","egress":true,"containers":[{"name":"c1","image":"nginx","resource":{"cpu":"100m","memory":"64Mi","ephemeralStorage":"96Mi"}}],"ports":[]}`), 200)
 	must(http.MethodPost, "/nodes/n1/sandboxes", []byte(`{"id":"s1"`), 400)
 	must(http.MethodDelete, "/nodes/n1/sandboxes/s1", nil, 200)
 	must(http.MethodGet, "/nodes/n1/sandboxes/s1/containers/c1/logs?limit=100", nil, 200)
 	must(http.MethodPost, "/nodes/n1/reconcile", nil, 200)
 
-	must(http.MethodPost, "/sandboxes", []byte(`{"id":"obj-1","spec":{"egress":true,"containers":[{"name":"app","image":"nginx","resource":{"cpu":"100m","memory":"64Mi"}}]}}`), 201)
+	must(http.MethodPost, "/sandboxes", []byte(`{"id":"obj-1","spec":{"egress":true,"containers":[{"name":"app","image":"nginx","resource":{"cpu":"100m","memory":"64Mi","ephemeral_storage":"96Mi"}}]}}`), 201)
 	must(http.MethodPost, "/sandboxes", []byte(`{"id":"","spec":{"containers":[]}}`), 400)
 	must(http.MethodGet, "/sandboxes", nil, 200)
 	must(http.MethodGet, "/sandboxes/obj-1", nil, 200)
@@ -163,7 +163,7 @@ func TestCreateSandbox_RateLimit(t *testing.T) {
 	r := gin.New()
 	r.POST("/sandboxes", h.CreateSandbox)
 
-	body := []byte(`{"id":"rl-1","spec":{"egress":true,"containers":[{"name":"app","image":"nginx","resource":{"cpu":"100m","memory":"64Mi"}}]}}`)
+	body := []byte(`{"id":"rl-1","spec":{"egress":true,"containers":[{"name":"app","image":"nginx","resource":{"cpu":"100m","memory":"64Mi","ephemeral_storage":"96Mi"}}]}}`)
 	req1 := httptest.NewRequest(http.MethodPost, "/sandboxes", bytes.NewReader(body))
 	req1.Header.Set("Content-Type", "application/json")
 	w1 := httptest.NewRecorder()
@@ -172,7 +172,7 @@ func TestCreateSandbox_RateLimit(t *testing.T) {
 		t.Fatalf("first create code=%d body=%s", w1.Code, w1.Body.String())
 	}
 
-	body2 := []byte(`{"id":"rl-2","spec":{"egress":true,"containers":[{"name":"app","image":"nginx","resource":{"cpu":"100m","memory":"64Mi"}}]}}`)
+	body2 := []byte(`{"id":"rl-2","spec":{"egress":true,"containers":[{"name":"app","image":"nginx","resource":{"cpu":"100m","memory":"64Mi","ephemeral_storage":"96Mi"}}]}}`)
 	req2 := httptest.NewRequest(http.MethodPost, "/sandboxes", bytes.NewReader(body2))
 	req2.Header.Set("Content-Type", "application/json")
 	w2 := httptest.NewRecorder()

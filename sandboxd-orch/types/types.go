@@ -123,8 +123,9 @@ type SandboxContainerSpec struct {
 }
 
 type SandboxResource struct {
-	CPU    string `json:"cpu" yaml:"cpu"`
-	Memory string `json:"memory" yaml:"memory"`
+	CPU              string `json:"cpu" yaml:"cpu"`
+	Memory           string `json:"memory" yaml:"memory"`
+	EphemeralStorage string `json:"ephemeral_storage,omitempty" yaml:"ephemeral_storage,omitempty"`
 }
 
 type SandboxPortSpec struct {

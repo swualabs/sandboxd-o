@@ -67,11 +67,14 @@ type ResourceLimits struct {
 	CPUQuota    int64  `json:"cpuQuota"`
 	CPUPeriod   uint64 `json:"cpuPeriod"`
 	PidsLimit   int64  `json:"pidsLimit"`
+	RootfsBytes int64  `json:"rootfsBytes,omitempty"`
+	TmpfsBytes  int64  `json:"tmpfsBytes,omitempty"`
 }
 
 type ResourceSpec struct {
-	CPU    string `json:"cpu"`
-	Memory string `json:"memory"`
+	CPU              string `json:"cpu"`
+	Memory           string `json:"memory"`
+	EphemeralStorage string `json:"ephemeralStorage,omitempty"`
 }
 
 type PortMapping struct {
