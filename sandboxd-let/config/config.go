@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"sandboxd-o/pkg/envutil"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 const (
@@ -37,6 +39,9 @@ type Config struct {
 	ReconcileGrace         time.Duration
 	ReconcileHits          int
 	RuntimeBinary          string
+	DefaultEphemeralBytes  int64
+	RootfsRatioPercent     int
+	TmpfsRatioPercent      int
 	MaxAllocPercent        int
 	ProvisionTimeout       time.Duration
 	ContainerCreateTimeout time.Duration
@@ -61,11 +66,28 @@ func DefaultConfig() Config {
 		ReconcileGrace:         DefaultReconcileGrace,
 		ReconcileHits:          DefaultReconcileHits,
 		RuntimeBinary:          envutil.Get("SANDBOX_RUNTIME_BINARY", DefaultRuntimeBinary),
+		DefaultEphemeralBytes:  parseSizeBytes(envutil.Get("SANDBOX_DEFAULT_EPHEMERAL_STORAGE", "128Mi"), 128*1024*1024),
+		RootfsRatioPercent:     envutil.GetInt("SANDBOX_EPHEMERAL_ROOTFS_PERCENT", 80),
+		TmpfsRatioPercent:      envutil.GetInt("SANDBOX_EPHEMERAL_TMP_PERCENT", 20),
 		MaxAllocPercent:        envutil.GetInt("SANDBOX_MAX_ALLOC_PERCENT", 90),
 		ProvisionTimeout:       envutil.GetDuration("SANDBOX_PROVISION_TIMEOUT", DefaultProvisionTimeout),
 		ContainerCreateTimeout: envutil.GetDuration("SANDBOX_CONTAINER_CREATE_TIMEOUT", DefaultContainerCreateTimeout),
 		ImagePullTimeout:       envutil.GetDuration("SANDBOX_IMAGE_PULL_TIMEOUT", DefaultImagePullTimeout),
 	}
+}
+
+func parseSizeBytes(raw string, def int64) int64 {
+	q, err := resource.ParseQuantity(raw)
+	if err != nil {
+		return def
+	}
+
+	v := q.Value()
+	if v <= 0 {
+		return def
+	}
+
+	return v
 }
 
 func WithConfigDefaults(cfg Config) Config {
@@ -108,6 +130,15 @@ func WithConfigDefaults(cfg Config) Config {
 
 	if cfg.RuntimeBinary == "" {
 		cfg.RuntimeBinary = DefaultRuntimeBinary
+	}
+
+	if cfg.DefaultEphemeralBytes <= 0 {
+		cfg.DefaultEphemeralBytes = 128 * 1024 * 1024
+	}
+
+	if cfg.RootfsRatioPercent <= 0 || cfg.TmpfsRatioPercent < 0 || cfg.RootfsRatioPercent+cfg.TmpfsRatioPercent != 100 {
+		cfg.RootfsRatioPercent = 80
+		cfg.TmpfsRatioPercent = 20
 	}
 
 	if cfg.MaxAllocPercent <= 0 || cfg.MaxAllocPercent > 100 {

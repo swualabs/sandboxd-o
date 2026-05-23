@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -46,6 +47,7 @@ func (s *Service) createPodSandboxCRI(ctx context.Context, sbx *model.Sandbox, r
 		Labels: map[string]string{
 			"sandbox-id": sbx.ID,
 		},
+		Annotations: map[string]string{},
 		Linux: &runtimeapi.LinuxPodSandboxConfig{
 			CgroupParent:    cgroupParent,
 			SecurityContext: &runtimeapi.LinuxSandboxSecurityContext{},
@@ -55,6 +57,10 @@ func (s *Service) createPodSandboxCRI(ctx context.Context, sbx *model.Sandbox, r
 
 	cfg.DnsConfig = &runtimeapi.DNSConfig{
 		Servers: sandboxDNSServers(),
+	}
+	rootfsBytes := s.estimatePodRootfsBytes(reqContainers)
+	if rootfsBytes > 0 {
+		cfg.Annotations["dev.gvisor.flag.overlay2"] = fmt.Sprintf("root:self,size=%d", rootfsBytes)
 	}
 
 	podID, err := s.cri.runPodSandbox(ctx, cfg, s.runtimeBinary)
@@ -72,6 +78,24 @@ func (s *Service) createPodSandboxCRI(ctx context.Context, sbx *model.Sandbox, r
 	}
 
 	return podID, status.GetNetwork().GetIp(), cfg, nil
+}
+
+func (s *Service) estimatePodRootfsBytes(containers []model.CreateContainerRequest) int64 {
+	maxRoot := int64(0)
+	for _, c := range containers {
+		r, err := parseContainerResource(c.Resource)
+		if err != nil {
+			continue
+		}
+
+		lim := parsedResourceToLimits(r)
+		s.applyEphemeralLimits(&lim, r)
+		if lim.RootfsBytes > maxRoot {
+			maxRoot = lim.RootfsBytes
+		}
+	}
+
+	return maxRoot
 }
 
 func ensureSandboxParentCgroup(baseParent, sandboxID string, lim *runtimeapi.LinuxContainerResources) (string, error) {
@@ -150,12 +174,12 @@ func ensureCgroupSubtreeControllers(cgroupPath string, controllers []string) err
 	}
 
 	available := map[string]struct{}{}
-	for _, c := range strings.Fields(string(availableRaw)) {
+	for c := range strings.FieldsSeq(string(availableRaw)) {
 		available[c] = struct{}{}
 	}
 
 	enabled := map[string]struct{}{}
-	for _, c := range strings.Fields(string(enabledRaw)) {
+	for c := range strings.FieldsSeq(string(enabledRaw)) {
 		enabled[c] = struct{}{}
 	}
 
@@ -249,7 +273,7 @@ func writeCgroupValue(path, value string) error {
 	}
 
 	var lastErr error
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		if err := os.WriteFile(path, []byte(v), 0o644); err == nil {
 			return nil
 		} else {
@@ -335,6 +359,20 @@ func (s *Service) createAndStartCRIContainer(ctx context.Context, sbx *model.San
 		envs = append(envs, &runtimeapi.KeyValue{Key: parts[0], Value: parts[1]})
 	}
 
+	mounts := []*runtimeapi.Mount{}
+	tmpHostPath, err := s.ensureSandboxTmpfsMount(sbx.ID, c.Name, "tmp", lim.TmpfsBytes)
+	if err != nil {
+		return model.ContainerState{}, err
+	}
+
+	if tmpHostPath != "" {
+		mounts = append(mounts, &runtimeapi.Mount{
+			ContainerPath: "/tmp",
+			HostPath:      tmpHostPath,
+			Readonly:      false,
+		})
+	}
+
 	ctrCfg := &runtimeapi.ContainerConfig{
 		Metadata: &runtimeapi.ContainerMetadata{Name: c.Name},
 		Image:    &runtimeapi.ImageSpec{Image: normalizeImage(c.Image)},
@@ -375,6 +413,7 @@ func (s *Service) createAndStartCRIContainer(ctx context.Context, sbx *model.San
 				},
 			},
 		},
+		Mounts: mounts,
 	}
 	if c.WorkDir != "" {
 		ctrCfg.WorkingDir = c.WorkDir
@@ -410,6 +449,45 @@ func (s *Service) createAndStartCRIContainer(ctx context.Context, sbx *model.San
 		Runtime:    s.runtimeBinary,
 		TaskStatus: "running",
 	}, nil
+}
+
+func (s *Service) ensureSandboxTmpfsMount(sandboxID, containerName, kind string, bytes int64) (string, error) {
+	if bytes <= 0 {
+		return "", nil
+	}
+
+	base := filepath.Join(s.cfg.StateBaseDir, sandboxID, "tmpfs", containerName, kind)
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		return "", fmt.Errorf("mkdir tmpfs mount path %s: %w", base, err)
+	}
+
+	resolvedBase := resolvePath(base)
+	if isMountPoint(resolvedBase) {
+		return resolvedBase, nil
+	}
+
+	opt := fmt.Sprintf("size=%d,mode=1777", bytes)
+	cmd := exec.Command("mount", "-t", "tmpfs", "-o", opt, "tmpfs", resolvedBase)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("mount tmpfs %s (%s): %w: %s", resolvedBase, opt, err, strings.TrimSpace(string(out)))
+	}
+
+	return resolvedBase, nil
+}
+
+func isMountPoint(path string) bool {
+	raw, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return false
+	}
+	target := path + " "
+	for ln := range strings.SplitSeq(string(raw), "\n") {
+		if strings.Contains(ln, " "+target) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) stopAndDeleteCRISandbox(ctx context.Context, podID string) {
@@ -473,10 +551,43 @@ func (s *Service) deleteSandboxRuntimeArtifacts(ctx context.Context, sbx *model.
 	s.cleanupHostPortPublish(sbx)
 	s.cleanupSandboxNetworkPolicy(sbx)
 	s.cleanupSandboxCNI(ctx, sbx.ID)
+	s.cleanupSandboxTmpfsMounts(sbx.ID)
 	cleanupSandboxParentCgroup(s.cfg.CgroupParent, sbx.ID)
 	s.dbg("cleanup runtime artifacts done sandbox=%s", sbx.ID)
 
 	return nil
+}
+
+func (s *Service) cleanupSandboxTmpfsMounts(sandboxID string) {
+	if strings.TrimSpace(sandboxID) == "" {
+		return
+	}
+
+	base := resolvePath(filepath.Join(s.cfg.StateBaseDir, sandboxID, "tmpfs"))
+	_ = filepath.Walk(base, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || !info.IsDir() {
+			return nil
+		}
+
+		resolvedPath := resolvePath(path)
+		if !isMountPoint(resolvedPath) {
+			return nil
+		}
+
+		_ = exec.Command("umount", "-l", resolvedPath).Run()
+		return nil
+	})
+
+	_ = os.RemoveAll(base)
+}
+
+func resolvePath(path string) string {
+	p, err := filepath.EvalSymlinks(path)
+	if err != nil || strings.TrimSpace(p) == "" {
+		return path
+	}
+
+	return p
 }
 
 func (s *Service) cleanupCNICache(sandboxID string) error {

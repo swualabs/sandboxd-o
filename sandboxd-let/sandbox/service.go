@@ -267,6 +267,7 @@ func (s *Service) provisionSandboxSync(ctx context.Context, sbx *model.Sandbox, 
 		}
 
 		lim := parsedResourceToLimits(parsedRes)
+		s.applyEphemeralLimits(&lim, parsedRes)
 
 		pullCtx, pullCancel := context.WithTimeout(ctx, s.cfg.ImagePullTimeout)
 		pullErr := s.cri.pullImage(pullCtx, normalizeImage(c.Image))

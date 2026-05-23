@@ -29,3 +29,17 @@ func TestWithConfigDefaults(t *testing.T) {
 		t.Fatalf("unexpected normalized config: %+v", cfg)
 	}
 }
+
+func TestWithConfigDefaults_EphemeralSplitNormalization(t *testing.T) {
+	cfg := WithConfigDefaults(Config{
+		DefaultEphemeralBytes: -1,
+		RootfsRatioPercent:    70,
+		TmpfsRatioPercent:     10,
+	})
+	if cfg.DefaultEphemeralBytes <= 0 {
+		t.Fatalf("default ephemeral bytes not normalized: %d", cfg.DefaultEphemeralBytes)
+	}
+	if cfg.RootfsRatioPercent != 80 || cfg.TmpfsRatioPercent != 20 {
+		t.Fatalf("unexpected split: root=%d tmp=%d", cfg.RootfsRatioPercent, cfg.TmpfsRatioPercent)
+	}
+}

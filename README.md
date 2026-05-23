@@ -66,7 +66,7 @@ This project is actively used as a core component of the sandbox environment(VM)
 
 This project is broadly divided into three main components. Each component is described below, and the overall architecture was designed by referencing and simplifying the structure of Kubernetes.
 
-![full architecture](./assets/full.drawio.png)
+![full architecture](./assets/full.png)
 
 ## Sandboxd Let(sbxlet) Runtime
 
@@ -74,7 +74,7 @@ This component corresponds to Kubernetes' kubelet and is deployed to each worker
 
 It uses gVisor as the container runtime to provide an isolated sandbox environment and manages sandboxes and networking based on PodSandbox from Containerd CRI.
 
-![sbxlet Architecture](./assets/sbxlet-architecture.drawio.png)
+![sbxlet Architecture](./assets/sbxlet-architecture.png)
 
 To achieve the project's core goal of providing "the strongest possible isolation within practical limits," sandbox environments are built using `runsc`, the runtime of gVisor.
 
@@ -100,7 +100,7 @@ Traffic routing is then handled using `iptables` to support host-to-sandbox acce
 
 For a more detailed flow, please refer to the architecture diagram below.
 
-![sbxlet Networking Model](./assets/sbxlet-networking-model.drawio.png)
+![sbxlet Networking Model](./assets/sbxlet-networking-model.png)
 
 > [!NOTE]
 >
@@ -140,7 +140,7 @@ However, this approach is not recommended, since it bypasses sbxorch features su
 
 This is the official orchestrator of sandboxd-o and is responsible for scheduling sandboxes onto appropriate worker nodes, allocating host ports, and handling the Reconcile loop as well as the Resource/Status Sync Loop.
 
-![full architecture](./assets/full.drawio.png)
+![full architecture](./assets/full.png)
 
 ### HTTP Server and Database
 
@@ -410,6 +410,7 @@ The following is an example container specification capable of running a sample 
   resource:
       cpu: 100m
       memory: 256Mi
+      ephemeral_storage: 96Mi
 ```
 
 - `name`: The name of the container. It must be unique within the sandbox. Rather than generating it randomly, the name is explicitly specified so that it can be configured directly by the client.
@@ -428,6 +429,12 @@ The following is an example container specification capable of running a sample 
 
     `cpu` represents the CPU resources allocated to the container, and `memory` represents the memory resources allocated to the container. These values act as both Request and Limit and determine the maximum amount of resources the container can consume.
 
+    `ephemeral_storage` is optional and controls writable filesystem limits. When set, sbxlet applies this total budget by splitting it into:
+    - root writable layer (`/`) = 80%
+    - temporary filesystem (`/tmp`) = 20%
+
+    The root writable layer and `/tmp` will return `ENOSPC` when each split limit is exceeded.
+
     CPU values are expressed in millicores, for example `100m` represents `0.1` CPU.
 
     Memory values are expressed in bytes, for example `256Mi` represents 256 mebibytes (approximately 268,435,456 bytes).
@@ -435,6 +442,11 @@ The following is an example container specification capable of running a sample 
     Resource enforcement is implemented using cgroups, and gVisor is custom patched, built, and used for proper enforcement.
 
     For more details, refer to the [Reference](#reference) section below.
+
+> [!NOTE]
+> However, in the case of `/dev/shm`, it appears that `runsc` internally mounts a separate `tmpfs`.
+>
+> As a result, it could not be controlled at the code level in the current implementation. Further investigation and experimentation will be conducted in the future to determine whether limits can be enforced for this mount point as well.
 
 ## Sandbox/Container State
 
@@ -621,6 +633,9 @@ SANDBOX_MAX_ALLOC_PERCENT=90 # maximum percentage of node resources that can be 
 SANDBOX_PROVISION_TIMEOUT=4m # timeout for provisioning a sandbox, including image pulling and container creation, default is 4 minutes
 SANDBOX_CONTAINER_CREATE_TIMEOUT=2m # timeout for creating a container, default is 2 minutes
 SANDBOX_IMAGE_PULL_TIMEOUT=8m # timeout for pulling an image, default is 8 minutes
+SANDBOX_DEFAULT_EPHEMERAL_STORAGE=128Mi # default per-container writable storage budget if ephemeral_storage is omitted
+SANDBOX_EPHEMERAL_ROOTFS_PERCENT=80 # split ratio for root writable layer (/), must satisfy rootfs+tmp=100
+SANDBOX_EPHEMERAL_TMP_PERCENT=20 # split ratio for /tmp, must satisfy rootfs+tmp=100
 
 # Chains to hook SANDBOX-FWD jump (comma-separated)
 SANDBOX_FORWARD_HOOK_CHAINS=FORWARD,DOCKER-USER # default chains to hook iptables rules for sandbox port forwarding, can be customized as needed

@@ -17,8 +17,10 @@ import (
 )
 
 type parsedResource struct {
-	CPUMilli    int64
-	MemoryBytes int64
+	CPUMilli        int64
+	MemoryBytes     int64
+	EphemeralBytes  int64
+	HasEphemeralSet bool
 }
 
 func parseContainerResource(in model.ResourceSpec) (parsedResource, error) {
@@ -32,7 +34,23 @@ func parseContainerResource(in model.ResourceSpec) (parsedResource, error) {
 		return parsedResource{}, err
 	}
 
-	return parsedResource{CPUMilli: cpuMilli, MemoryBytes: memBytes}, nil
+	ephemeralBytes := int64(0)
+	hasEphemeral := false
+	if strings.TrimSpace(in.EphemeralStorage) != "" {
+		ephemeralBytes, err = parseMemoryBytes(in.EphemeralStorage)
+		if err != nil {
+			return parsedResource{}, fmt.Errorf("invalid ephemeralStorage: %s", in.EphemeralStorage)
+		}
+
+		hasEphemeral = true
+	}
+
+	return parsedResource{
+		CPUMilli:        cpuMilli,
+		MemoryBytes:     memBytes,
+		EphemeralBytes:  ephemeralBytes,
+		HasEphemeralSet: hasEphemeral,
+	}, nil
 }
 
 func parseCPUMilli(raw string) (int64, error) {
@@ -83,6 +101,42 @@ func parsedResourceToLimits(r parsedResource) model.ResourceLimits {
 		CPUPeriod:   period,
 		PidsLimit:   128,
 	}
+}
+
+func (s *Service) applyEphemeralLimits(lim *model.ResourceLimits, r parsedResource) {
+	if lim == nil {
+		return
+	}
+
+	total := r.EphemeralBytes
+	if !r.HasEphemeralSet {
+		total = s.cfg.DefaultEphemeralBytes
+	}
+
+	if total <= 0 {
+		return
+	}
+
+	root := total * int64(s.cfg.RootfsRatioPercent) / 100
+	tmp := total - root
+
+	const minRoot = int64(32 * 1024 * 1024)
+	const minTmp = int64(16 * 1024 * 1024)
+
+	if total >= minRoot+minTmp {
+		if root < minRoot {
+			root = minRoot
+			tmp = total - root
+		}
+
+		if tmp < minTmp {
+			tmp = minTmp
+			root = total - tmp
+		}
+	}
+
+	lim.RootfsBytes = root
+	lim.TmpfsBytes = tmp
 }
 
 func (s *Service) enforceAdmission(req model.CreateSandboxRequest) error {

@@ -18,3 +18,4 @@ spec:
       resource:
         cpu: 50m
         memory: 64Mi
+        ephemeral_storage: 96Mi

@@ -158,9 +158,9 @@ Get a single node.
 Delete a node registration.
 
 - Query: `force` (optional, boolean)
-  - `false` or omitted: orchestrator calls node APIs (sandbox delete/reconcile) and fails node deletion if those calls fail.
-  - `true`: orchestrator skips node API failures and force-deletes node metadata.
-  - Use `force=true` only when the node is already confirmed gone/unreachable.
+    - `false` or omitted: orchestrator calls node APIs (sandbox delete/reconcile) and fails node deletion if those calls fail.
+    - `true`: orchestrator skips node API failures and force-deletes node metadata.
+    - Use `force=true` only when the node is already confirmed gone/unreachable.
 - Success: `200 OK`
 - Failure: `400 Bad Request` (empty/invalid name)
 - Failure: `500 Internal Server Error`
@@ -251,7 +251,8 @@ Create a control-plane sandbox object for scheduling and reconciliation.
                 "work_dir": "",
                 "resource": {
                     "cpu": "200m",
-                    "memory": "256Mi"
+                    "memory": "256Mi",
+                    "ephemeral_storage": "96Mi"
                 }
             }
         ]
@@ -323,7 +324,8 @@ List all control-plane sandbox objects.
                         "image": "nginx:latest",
                         "resource": {
                             "cpu": "200m",
-                            "memory": "256Mi"
+                            "memory": "256Mi",
+                            "ephemeral_storage": "96Mi"
                         }
                     }
                 ]
@@ -470,7 +472,8 @@ Create sandbox directly on selected node (sbxlet API pass-through).
             "image": "nginx:latest",
             "resource": {
                 "cpu": "200m",
-                "memory": "256Mi"
+                "memory": "256Mi",
+                "ephemeral_storage": "96Mi"
             }
         }
     ]
@@ -559,7 +562,7 @@ Trigger sbxlet reconcile on selected node.
 Resolved host port mapping used by scheduler and runtime provisioning:
 
 - `host_port`: orchestrator-assigned host-side port (automatically selected within configured range)
-  - In `spec.ports`, client-sent `host_port` is accepted for backward compatibility but ignored.
+    - In `spec.ports`, client-sent `host_port` is accepted for backward compatibility but ignored.
 - `container_port`: target container port
 - `protocol`: `tcp` or `udp`
 
