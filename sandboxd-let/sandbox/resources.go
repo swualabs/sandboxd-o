@@ -123,12 +123,16 @@ func (s *Service) applyEphemeralLimits(lim *model.ResourceLimits, r parsedResour
 	const minRoot = int64(32 * 1024 * 1024)
 	const minTmp = int64(16 * 1024 * 1024)
 
-	if root < minRoot {
-		root = minRoot
-	}
+	if total >= minRoot+minTmp {
+		if root < minRoot {
+			root = minRoot
+			tmp = total - root
+		}
 
-	if tmp < minTmp {
-		tmp = minTmp
+		if tmp < minTmp {
+			tmp = minTmp
+			root = total - tmp
+		}
 	}
 
 	lim.RootfsBytes = root

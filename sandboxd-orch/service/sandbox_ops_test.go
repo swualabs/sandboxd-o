@@ -171,6 +171,36 @@ func TestCreateSandboxOnNode_ForwardsEphemeralStorage(t *testing.T) {
 	}
 }
 
+func TestCreateSandbox_RejectsInvalidEphemeralStorage(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	s := newServiceWithNode(t, server)
+	defer s.Close()
+
+	_, err := s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
+		ID: "sbx-invalid-ephemeral",
+		Spec: types.SandboxSpec{
+			Containers: []types.SandboxContainerSpec{{
+				Name:  "app",
+				Image: "ubuntu:24.04",
+				Resource: types.SandboxResource{
+					CPU:              "100m",
+					Memory:           "64Mi",
+					EphemeralStorage: "not-a-size",
+				},
+			}},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected create validation error")
+	}
+
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput, got %v", err)
+	}
+}
+
 func TestScheduler_AssignsDistinctPortsAcrossSandboxes(t *testing.T) {
 	sbxNode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.Path == "/v1/sandboxes" {

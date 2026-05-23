@@ -153,6 +153,12 @@ func validateSandboxCreate(req types.CreateSandboxObjectRequest) error {
 		if _, err := parseMemoryBytes(c.Resource.Memory); err != nil {
 			return fmt.Errorf("%w: invalid memory for container %s", ErrInvalidInput, c.Name)
 		}
+
+		if strings.TrimSpace(c.Resource.EphemeralStorage) != "" {
+			if _, err := parseMemoryBytes(c.Resource.EphemeralStorage); err != nil {
+				return fmt.Errorf("%w: invalid ephemeral_storage for container %s", ErrInvalidInput, c.Name)
+			}
+		}
 	}
 
 	for _, p := range req.Spec.Ports {
