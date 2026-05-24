@@ -42,16 +42,17 @@
     - [Build and Usage](#build-and-usage)
 - [Environment Variables](#environment-variables)
 - [Testing](#testing)
-- [Performance and Benchmarking](#performance-and-benchmarking)
+- [Appendix A. Performance and Benchmarking](#appendix-a-performance-and-benchmarking)
     - [Client Observed](#client-observed)
     - [Sbxlet Internal](#sbxlet-internal)
     - [Discussion](#discussion)
-    - [Appendix A: Performance Measurements with Relaxed CPU/Memory Limits](#appendix-a-performance-measurements-with-relaxed-cpumemory-limits)
-- [Reference](#reference)
-- [API Documentation](#api-documentation)
-- [FAQ, Troubleshooting and Best Practices](#faq-troubleshooting-and-best-practices)
-- [Contribution and Contributors](#contribution-and-contributors)
-- [License](#license)
+    - [Performance Measurements with Relaxed CPU/Memory Limits](#performance-measurements-with-relaxed-cpumemory-limits)
+- [Appendix B. Infrastructure Cost Comparison (vs K8s)](#appendix-b-infrastructure-cost-comparison-vs-k8s)
+- [Appendix C. Reference](#appendix-c-reference)
+- [Appendix D. API Documentation](#appendix-d-api-documentation)
+- [Appendix E. FAQ, Troubleshooting and Best Practices](#appendix-e-faq-troubleshooting-and-best-practices)
+- [Appendix F. Contribution and Contributors](#appendix-f-contribution-and-contributors)
+- [Appendix G. License](#appendix-g-license)
 
 ---
 
@@ -710,7 +711,7 @@ The target test coverage is at least **70%** for both overall and PATCH coverage
 
 However, since there are components that are difficult to test—such as sbxlet—certain exceptions are defined. Please refer to [`codecov.yaml`](./codecov.yaml) for details.
 
-# Performance and Benchmarking
+# Appendix A. Performance and Benchmarking
 
 In this section, we summarize the performance measurement results for a sandbox creation workload on sbxlet using the following configuration containing a single nginx container.
 
@@ -857,7 +858,7 @@ Excluding that, the stages that consume the most time are `pod_sandbox_create_to
 | pod_sandbox_create_total     |  45 | 1077.673 | 1077.415 | 1325.760 | 1382.731 | 1457.871 |
 | container_create_start_total |  45 |  939.860 |  959.595 | 1250.632 | 1315.935 | 1343.643 |
 
-## Appendix A: Performance Measurements with Relaxed CPU/Memory Limits
+## Performance Measurements with Relaxed CPU/Memory Limits
 
 The slowest stage, `wait_published_tcp_ready`, is directly related to constrained CPU and memory resources.
 
@@ -892,27 +893,183 @@ Of course, the actual user-perceived latency represented by `client_ready_ms` ma
 
 Additionally, `wait_published_tcp_ready` may introduce extra delay due to its internal retry mechanism, so the measurements above should not be considered perfectly precise.
 
-# Reference
+# Appendix B. Infrastructure Cost Comparison (vs K8s)
+
+In this section, we use one real-world use case to compare infrastructure costs between replacing [container-provisioner-k8s](https://github.com/nullforu/container-provisioner-k8s?utm_source=chatgpt.com) with Sandboxd-O in [SMCTF](https://github.com/nullforu/smctf?utm_source=chatgpt.com) and its associated infrastructure.
+
+SMCTF is a CTF platform where `container-provisioner-k8s` was originally used to provision VM (Stack) containers on top of a Kubernetes cluster.
+
+However, this introduced unnecessary Kubernetes complexity, operational overhead, and overengineering. In practice, Kubernetes-level functionality was not actually required, and its networking model did not align well with the intended sandbox architecture. (Sandboxes neither needed to communicate with one another nor should have been allowed to.)
+
+For this reason, Sandboxd-O was developed and adopted as a replacement for `container-provisioner-k8s`, and the SMCTF infrastructure was redesigned accordingly.
+
+More details can be found in the repositories below:
+
+* [smctf](https://github.com/nullforu/smctf?utm_source=chatgpt.com)
+* [smctf-infra-v2](https://github.com/nullforu/smctf-infra-v2?utm_source=chatgpt.com) (and the previous [smctf-infra based on container-provisioner-k8s](https://github.com/nullforu/smctf-infra?utm_source=chatgpt.com))
+
+The example below demonstrates how infrastructure costs changed after the migration (that is, comparing `smctf-infra` and `smctf-infra-v2`).
+
+> [!NOTE]
+>
+> The example assumes:
+>
+> * MAU: **10,000 users**
+> * AWS region: **Seoul (`ap-northeast-2`)**
+> * Costs are approximate and may not be exact.
+>
+> Shared infrastructure costs excluded from both environments:
+>
+> * RDS
+> * ElastiCache
+> * S3
+> * ECR
+> * CloudWatch
+> * Data transfer / Internet egress charges
+
+The following hourly prices are rough estimates for comparison purposes and may differ depending on discounts (SP, RI, EDP), taxes, and actual usage.
+
+* EKS control plane: `$0.10 / hour`
+* NAT Gateway hourly: `$0.045 / hour`
+* ALB hourly (base): `$0.0225 / hour`
+* ALB LCU: `$0.008 / LCU-hour` (example assumption)
+* EC2 `t3a.medium` (`ap-northeast-2`): `$0.0468 / hour`
+* Fargate (Linux/x86): since exact Seoul pricing should be taken from the console or calculator, this report uses **conservative estimates**
+
+  * `vCPU-hour ~= $0.050`
+  * `GB-hour ~= $0.0055`
+
+Traffic and capacity assumptions:
+
+* Low average load with peak increases during certain periods
+* Average backend demand equivalent to **1–2 running tasks**
+* Peaks reaching **3–4 running tasks**
+
+**v1 (K8s / EKS)**
+
+* Backend nodes: `t3a.medium ×2` (always running)
+* Stack nodes: `t3a.medium ×2` (minimum reserved headroom)
+* Total: **4 EC2 instances + EKS control plane**
+
+**v2 (Sandboxd-O)**
+
+* Sandbox workers: `t3a.medium ×2` (always running)
+* Sandbox control plane: `t3a.medium ×1` (always running)
+* Backend: Fargate tasks (`1 vCPU / 2GB`) with autoscaling
+
+Cost calculation formulas:
+
+* Monthly Cost:
+
+$$
+\text{Monthly Cost} = \text{Hourly Cost} \times 730
+$$
+
+* Task Hourly Cost:
+
+$$
+\text{Task Hourly Cost}
+=
+(\text{vCPU} \times \text{vCPU Price})
++
+(\text{MemoryGB} \times \text{GB Price})
+$$
+
+Using this report's assumptions (`1 vCPU`, `2GB`):
+
+$$
+(1 \times 0.050) + (2 \times 0.0055)
+$$
+
+$$
+= 0.061\ \text{USD/hour/task}
+$$
+
+Based on these assumptions:
+
+**v1 (K8s / EKS)**
+
+* EC2 (4 instances):
+
+$$
+4 \times 0.0468 \times 730 = 136.66
+$$
+
+* EKS control plane:
+
+$$
+0.10 \times 730 = 73.00
+$$
+
+* ALB (hourly + 1 LCU):
+
+$$
+(0.0225 + 0.008) \times 730 = 22.27
+$$
+
+* NAT Gateway (hourly):
+
+$$
+0.045 \times 730 = 32.85
+$$
+
+**Total: `264.78 USD/month` (~ `397,170 KRW/month`)**
+
+**v2 (Sandboxd-O)**
+
+* EC2 (3 instances):
+
+$$
+3 \times 0.0468 \times 730 = 102.50
+$$
+
+* Fargate backend (average 1.2 tasks):
+
+$$
+0.061 \times 730 \times 1.2 = 53.44
+$$
+
+* ALB (hourly + 1 LCU):
+
+$$
+22.27
+$$
+
+* NAT Gateway (hourly):
+
+$$
+32.85
+$$
+
+**Total: `211.06 USD/month` (~ `316,590 KRW/month`)**
+
+This results in an absolute reduction of **53.72 USD/month**, corresponding to approximately **20.3% cost savings**, showing that v2 reduces infrastructure cost compared to v1.
+
+In particular, one major factor is that v1 incurred unnecessary fixed costs for the Kubernetes control plane, whereas in v2 the backend moved to the serverless Fargate platform with autoscaling, enabling cost optimization based on actual usage.
+
+That said, this comparison is not exact and includes many variables such as real traffic patterns, reliability requirements, and different operational goals. Therefore, decisions should not be made based solely on cost, but should also consider overall system design, operational complexity, and whether the architecture satisfies actual requirements.
+
+# Appendix C. Reference
 
 - [swualabs/gvisor-shim-patched](https://github.com/swualabs/gvisor-shim-patched) : This is a patched version of the gVisor shim modified to resolve issues related to cgroup resource limit enforcement. for more details, refer to commit [`041e28d`](https://github.com/swualabs/gvisor-shim-patched/commit/041e28d) in the corresponding fork repository or [swualabs/sandboxd-o PR #11](https://github.com/swualabs/sandboxd-o/pull/11).
 
-# API Documentation
+# Appendix D. API Documentation
 
 REST API documentation can be found in [docs/orchestrator.md](./docs/orchestrator.md) or [docs/sandboxd.md](./docs/sandboxd.md), and Swagger documentation is available at the following endpoints:
 
 - **sbxorch API Swagger Documentation**: `http://<sbxorch-address>/swagger/index.html`
 - **sbxlet API Swagger Documentation**: `http://<sbxlet-address>/swagger/index.html`
 
-# FAQ, Troubleshooting and Best Practices
+# Appendix E. FAQ, Troubleshooting and Best Practices
 
-# Contribution and Contributors
+# Appendix F. Contribution and Contributors
 
 | Name          | GitHub                               | Role               |
 | ------------- | ------------------------------------ | ------------------ |
 | Kim Jun Young | [@yulmwu](https://github.com/yulmwu) | Author, Maintainer |
 | ...           | ...                                  | ...                |
 
-# MIT License
+# Appendix G. MIT License
 
 ```
 Copyright (c) 2026 The Swua Labs Authors, Kim Jun Young as @yulmwu
