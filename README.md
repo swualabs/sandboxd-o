@@ -766,6 +766,8 @@ The test was conducted by repeatedly creating and deleting the same sandbox spec
 
 ## Sbxlet Internal
 
+![sbxlet Internal](./assets/sbxlet_internal_percent_stacked.png)
+
 | metric                         |   n |  mean_ms |   p50_ms |   p95_ms |   p99_ms |   max_ms |
 | ------------------------------ | --: | -------: | -------: | -------: | -------: | -------: |
 | total                          |  45 | 6390.907 | 6297.743 | 7150.538 | 7286.332 | 7491.614 |
@@ -798,6 +800,8 @@ Additionally, we collected `perf.stage` logs that further break down the PodSand
 
 These logs record timings at a more granular level by splitting PodSandbox creation and Container creation/startup into finer execution stages.
 
+![sbxlet Stage Pod](./assets/sbxlet_stage_pod_percent_stacked.png)
+
 | metric                          |   n |  mean_ms |   p50_ms |   p95_ms |   p99_ms |   max_ms |
 | ------------------------------- | --: | -------: | -------: | -------: | -------: | -------: |
 | stage_pod_aggregate_resources   |  45 |    0.017 |    0.016 |    0.022 |    0.053 |    0.058 |
@@ -806,6 +810,8 @@ These logs record timings at a more granular level by splitting PodSandbox creat
 | stage_pod_enforce_cgroup_limits |  45 |    0.717 |    0.849 |    0.901 |    0.937 |    1.001 |
 | stage_pod_status_query          |  45 |    0.907 |    0.984 |    1.095 |    1.881 |    2.000 |
 | stage_pod_create_total          |  45 | 1071.153 | 1073.222 | 1321.445 | 1378.830 | 1454.139 |
+
+![sbxlet Stage Container](./assets/sbxlet_stage_container_percent_stacked.png)
 
 | metric                                |   n | mean_ms |  p50_ms |   p95_ms |   p99_ms |   max_ms |
 | ------------------------------------- | --: | ------: | ------: | -------: | -------: | -------: |
@@ -858,6 +864,8 @@ The slowest stage, `wait_published_tcp_ready`, is directly related to constraine
 This is because the application running inside the container (nginx in this example) starts under restricted resources, and that startup process directly affects the point at which the TCP port actually becomes reachable.
 
 The following results were measured using the same workload but with increased resource limits of **3500m CPU** and **8Gi memory**.
+
+![Default vs Relaxed](./assets/default_vs_relaxed_horizontal_bars.png)
 
 | metric                       | Default (200m / 256Mi) | Relaxed (3500m / 8Gi) | Difference (Relaxed − Default) |
 | ---------------------------- | ---------------------: | --------------------: | -----------------------------: |
