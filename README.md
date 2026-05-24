@@ -968,11 +968,7 @@ $$
 * Task Hourly Cost:
 
 $$
-\text{Task Hourly Cost}
-=
-(\text{vCPU} \times \text{vCPU Price})
-+
-(\text{MemoryGB} \times \text{GB Price})
+Task\ Hourly\ Cost = (vCPU \times vCPUPrice) + (MemoryGB \times GBPrice)
 $$
 
 Using this report's assumptions (`1 vCPU`, `2GB`):
