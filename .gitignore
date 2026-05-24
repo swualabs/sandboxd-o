@@ -4,3 +4,4 @@ build
 coverage.output
 coverage.out
 .artifacts
+.perf

@@ -43,6 +43,10 @@
 - [Environment Variables](#environment-variables)
 - [Testing](#testing)
 - [Performance and Benchmarking](#performance-and-benchmarking)
+    - [Client Observed](#client-observed)
+    - [Sbxlet Internal](#sbxlet-internal)
+    - [Discussion](#discussion)
+    - [Appendix A: Performance Measurements with Relaxed CPU/Memory Limits](#appendix-a-performance-measurements-with-relaxed-cpumemory-limits)
 - [Reference](#reference)
 - [API Documentation](#api-documentation)
 - [FAQ, Troubleshooting and Best Practices](#faq-troubleshooting-and-best-practices)
@@ -708,11 +712,177 @@ However, since there are components that are difficult to test—such as sbxlet�
 
 # Performance and Benchmarking
 
-In this section, we briefly measure the time taken at each stage of sandbox provisioning and benchmark the results against [`container-provisioner-k8s`](https://github.com/swualabs/container-provisioner-k8s), which was previously used in the [SMCTF](https://github.com/nullforu/smctf)/[N4U Wargame](https://github.com/nullforu/wargame) platform.
+In this section, we summarize the performance measurement results for a sandbox creation workload on sbxlet using the following configuration containing a single nginx container.
 
+```yaml
+apiVersion: sandboxd.o/v1
+kind: Sandbox
+id: perf-nginx
+spec:
+    egress: false
+    ports:
+        - container_port: 80
+          protocol: tcp
+    containers:
+        - name: nginx
+          image: nginx:latest
+          resource:
+              cpu: 200m
+              memory: 256Mi
+              ephemeral_storage: 128Mi
 ```
-TODO
-```
+
+During the performance measurement process, the following probes were used as measurement targets. Data was collected by adding detailed timing logs for each stage inside `sbxlet`.
+
+- `pod_sandbox_create_total`: Total time required to create the PodSandbox (including namespace setup, base networking, and runtime initialization)
+- `container_create_start_total`: Total time for a single container covering `CreateContainer` + `StartContainer` + state verification
+- `container_image_pull`: Time spent checking image existence and attempting image pull (may be very small when cache hits occur)
+- `network_policy_apply`: Time required to apply sandbox firewall/isolation rules (`iptables`)
+- `hostport_publish_apply`: Time required to apply Host Port DNAT rules
+- `wait_sandbox_ready`: Waiting time until the runtime determines that the container has reached the running state
+- `wait_published_tcp_ready`: Waiting time until the published TCP port becomes actually reachable
+- `state_refresh_and_save_running`: Time required to refresh the final runtime state and persist the `Running` status
+
+Finally, `total` represents the complete elapsed time from the moment sbxlet enters the actual provisioning function until runtime state refresh completes and the `Running` state is persisted.
+
+Additionally, `client_ready_ms` represents the elapsed time from immediately before the client sends `POST /api/v1/sandboxes` to sbxorch until the sandbox appears as `Running` when queried through sbxorch.
+
+This metric reflects the perceived provisioning time from the user/control-plane perspective.
+
+The test was conducted by repeatedly creating and deleting the same sandbox specification **45 times**, and the collected data was analyzed using **p50**, **p95**, and **p99** tail latency metrics.
+
+> [!NOTE]
+> 
+> Script used for measurement:
+> 
+> - `scripts/run_nginx_perf.sh`
+> - `scripts/run_resource_sweep_full.py`
+
+## Client Observed
+
+| metric          |   n |  mean_ms |   p50_ms |   p95_ms |   p99_ms |   max_ms |
+| --------------- | --: | -------: | -------: | -------: | -------: | -------: |
+| client_ready_ms |  45 | 1519.489 | 1531.000 | 2141.000 | 2444.000 | 2925.000 |
+
+## Sbxlet Internal
+
+| metric                         |   n |  mean_ms |   p50_ms |   p95_ms |   p99_ms |   max_ms |
+| ------------------------------ | --: | -------: | -------: | -------: | -------: | -------: |
+| total                          |  45 | 6390.907 | 6297.743 | 7150.538 | 7286.332 | 7491.614 |
+| pod_sandbox_create_total       |  45 | 1077.673 | 1077.415 | 1325.760 | 1382.731 | 1457.871 |
+| container_image_pull           |  45 |    0.832 |    0.928 |    1.040 |    1.054 |    1.277 |
+| container_create_start_total   |  45 |  939.860 |  959.595 | 1250.632 | 1315.935 | 1343.643 |
+| network_policy_apply           |  45 |  186.506 |  197.714 |  243.802 |  245.806 |  266.276 |
+| wait_sandbox_ready             |  45 |    2.737 |    2.391 |    4.883 |    5.088 |    7.982 |
+| hostport_publish_apply         |  45 |   36.860 |   35.427 |   52.278 |   60.815 |   62.523 |
+| wait_published_tcp_ready       |  45 | 4112.959 | 4106.111 | 4815.551 | 4935.057 | 4950.302 |
+| state_refresh_and_save_running |  45 |    4.967 |    5.277 |    5.579 |    5.968 |    6.093 |
+
+> [!NOTE]
+>
+> Although the total runtime-internal stages measured above—including `wait_published_tcp_ready`—were observed to take approximately **4–5 seconds**, the perceived provisioning time from the client perspective (`client_ready_ms`) was measured at only **2–2.5 seconds**.
+>
+> This occurs because sbxlet processes part of its runtime-internal stages asynchronously. As a result, there are moments where the sandbox already appears as `Running` to the client while, internally within sbxlet, the `wait_published_tcp_ready` stage—which verifies TCP port reachability—has not yet completed.
+>
+> In practice, it was observed that there is roughly a **4–5 second gap** between the point where sbxorch reports the sandbox as `Running` and the point where the application's `wait_published_tcp_ready` stage completes and the published TCP port actually becomes reachable.
+>
+> This process only exists within sbxlet's runtime stages and is not currently used by sbxorch.
+>
+> It is intended for future features such as Readiness Probe support, and therefore it is more appropriate to exclude `wait_published_tcp_ready` when measuring total sandbox provisioning time.
+>
+> As a result, the total duration of all stages excluding `wait_published_tcp_ready` can be considered the point at which the runtime effectively reaches the `Running` state inside sbxlet, which was measured to be approximately **2–2.5 seconds**.
+
+---
+
+Additionally, we collected `perf.stage` logs that further break down the PodSandbox and Container (CRI) creation paths.
+
+These logs record timings at a more granular level by splitting PodSandbox creation and Container creation/startup into finer execution stages.
+
+| metric                          |   n |  mean_ms |   p50_ms |   p95_ms |   p99_ms |   max_ms |
+| ------------------------------- | --: | -------: | -------: | -------: | -------: | -------: |
+| stage_pod_aggregate_resources   |  45 |    0.017 |    0.016 |    0.022 |    0.053 |    0.058 |
+| stage_pod_ensure_parent_cgroup  |  45 |    1.001 |    1.010 |    1.195 |    1.349 |    2.446 |
+| stage_pod_run_pod_sandbox       |  45 | 1032.151 | 1011.824 | 1286.893 | 1328.708 | 1399.927 |
+| stage_pod_enforce_cgroup_limits |  45 |    0.717 |    0.849 |    0.901 |    0.937 |    1.001 |
+| stage_pod_status_query          |  45 |    0.907 |    0.984 |    1.095 |    1.881 |    2.000 |
+| stage_pod_create_total          |  45 | 1071.153 | 1073.222 | 1321.445 | 1378.830 | 1454.139 |
+
+| metric                                |   n | mean_ms |  p50_ms |   p95_ms |   p99_ms |   max_ms |
+| ------------------------------------- | --: | ------: | ------: | -------: | -------: | -------: |
+| stage_container_ensure_tmpfs_mount    |  45 |   7.459 |   7.909 |    9.545 |    9.965 |   10.195 |
+| stage_container_create                |  45 |  37.230 |  38.953 |   41.112 |   44.593 |   46.443 |
+| stage_container_start                 |  45 | 859.577 | 873.274 | 1176.329 | 1242.159 | 1247.740 |
+| stage_container_enforce_cgroup_limits |  45 |   0.843 |   0.905 |    0.943 |    0.973 |    1.482 |
+| stage_container_status_query          |  45 |   3.516 |   3.802 |    4.278 |    4.562 |    4.903 |
+| stage_container_create_start_total    |  45 | 935.134 | 956.013 | 1247.155 | 1312.172 | 1339.874 |
+
+In practice, it was confirmed that `pod_sandbox_create_total` and `container_create_start_total` in `perf.provision_sandbox` closely match the aggregate values of `stage_pod_create_total` and `stage_container_create_start_total`, respectively.
+
+This demonstrates that the stage-level timing logs are accurately mapped to the higher-level aggregated metrics.
+
+## Discussion
+
+Ultimately, for the sandbox creation workload containing a single nginx container, the perceived provisioning time from the client perspective (`client_ready_ms`) was measured to be approximately **1.5–2.5 seconds**.
+
+Additionally, inside sbxlet, part of the runtime stages appear to be processed asynchronously. As a result, there are points where the client observes the sandbox as `Running`, while internally the runtime has already transitioned to `Running` but verification of external TCP port availability is still in progress.
+
+In practice, it was observed that there is approximately a **4–5 second gap** between the moment sbxorch reports the sandbox as `Running` and the completion of the `wait_published_tcp_ready` stage, at which point the published TCP port actually becomes reachable.
+
+The stage that consumes the most time in the overall provisioning process is `wait_published_tcp_ready`, which waits until the published TCP port becomes externally reachable.
+
+Although this stage is processed asynchronously inside the runtime, there are moments where it remains incomplete even after the client observes the sandbox as `Running`. As a result, a noticeable gap exists between the perceived provisioning time and the total duration of the runtime-internal stages.
+
+| metric                   |   n |  mean_ms |   p50_ms |   p95_ms |   p99_ms |   max_ms |
+| ------------------------ | --: | -------: | -------: | -------: | -------: | -------: |
+| wait_published_tcp_ready |  45 | 4112.959 | 4106.111 | 4815.551 | 4935.057 | 4950.302 |
+
+Additionally, this test was conducted under a **Warm Image Cache** condition, and in practice the `container_image_pull` stage was measured to take only a negligible amount of time (approximately **0.8 ms**) due to cache hits.
+
+If the image is not cached and must be pulled from a registry, this stage may increase significantly depending on the image size, potentially ranging from **tens of seconds to several minutes**.
+
+| metric               |   n | mean_ms | p50_ms | p95_ms | p99_ms | max_ms |
+| -------------------- | --: | ------: | -----: | -----: | -----: | -----: |
+| container_image_pull |  45 |   0.832 |  0.928 |  1.040 |  1.054 |  1.277 |
+
+Excluding that, the stages that consume the most time are `pod_sandbox_create_total` and `container_create_start_total`, which represent the total time spent in the PodSandbox creation path and the Container creation/startup path, respectively.
+
+| metric                       |   n |  mean_ms |   p50_ms |   p95_ms |   p99_ms |   max_ms |
+| ---------------------------- | --: | -------: | -------: | -------: | -------: | -------: |
+| pod_sandbox_create_total     |  45 | 1077.673 | 1077.415 | 1325.760 | 1382.731 | 1457.871 |
+| container_create_start_total |  45 |  939.860 |  959.595 | 1250.632 | 1315.935 | 1343.643 |
+
+## Appendix A: Performance Measurements with Relaxed CPU/Memory Limits
+
+The slowest stage, `wait_published_tcp_ready`, is directly related to constrained CPU and memory resources.
+
+This is because the application running inside the container (nginx in this example) starts under restricted resources, and that startup process directly affects the point at which the TCP port actually becomes reachable.
+
+The following results were measured using the same workload but with increased resource limits of **3500m CPU** and **8Gi memory**.
+
+| metric                       | 기본 (200m/256Mi) | 완화 (3500m/8Gi) | 차이(완화-기본) |
+| ---------------------------- | ----------------: | ---------------: | --------------: |
+| total                        |          5927.704 |         1194.348 |       -4733.356 |
+| pod_sandbox_create_total     |          1145.843 |          306.458 |        -839.385 |
+| container_create_start_total |           811.175 |          280.107 |        -531.068 |
+| network_policy_apply         |           114.914 |           85.990 |         -28.924 |
+| hostport_publish_apply       |            19.961 |           19.285 |          -0.676 |
+| wait_published_tcp_ready     |          3783.487 |          456.029 |       -3327.458 |
+
+> [!WARNING]
+>
+> The results above and below were collected from a single test run and should not be generalized based on this data alone. In practice, it is necessary to perform **20–30 or more repeated measurements** to evaluate averages and distributions properly.
+
+Additionally, the results below summarize and visualize measurements taken while progressively relaxing CPU/memory limits from **50m / 64Mi** up to **Stage 7 (3500m / 8Gi)**.
+
+These values represent the total internal execution time inside sbxlet, including the `wait_published_tcp_ready` stage. _(Unit: ms)_
+
+![appendix_a_resource_sweep_internal.png](./assets/appendix_a_resource_sweep_internal.png)
+
+Although this depends on the resource requirements of the container image being used, for a basic nginx application the results show a downward trend similar to the graph above.
+
+Of course, the actual user-perceived latency represented by `client_ready_ms` may still appear relatively fast across all cases because `wait_published_tcp_ready` is processed asynchronously, and there are moments where the sandbox is already reported as `Running` even though that stage has not yet completed.
+
+Additionally, `wait_published_tcp_ready` may introduce extra delay due to its internal retry mechanism, so the measurements above should not be considered perfectly precise.
 
 # Reference
 

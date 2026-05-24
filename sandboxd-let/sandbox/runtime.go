@@ -21,16 +21,27 @@ import (
 var safeCgroupNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 
 func (s *Service) createPodSandboxCRI(ctx context.Context, sbx *model.Sandbox, reqContainers []model.CreateContainerRequest) (string, string, *runtimeapi.PodSandboxConfig, error) {
+	// PERF measurement disabled.
+	// t0 := time.Now()
 	if podID, ok := s.findManagedPodSandboxID(ctx, sbx.ID); ok {
+		// t := time.Now()
 		s.cri.stopAndRemovePodSandbox(ctx, podID)
+		// PERF measurement disabled.
+		// slog.Info("perf.stage", slog.String("sandbox", sbx.ID), slog.String("stage", "pod.find_and_cleanup_existing"), slog.Duration("duration", time.Since(t)))
 	}
 
+	// t := time.Now()
 	podRes, err := podSandboxResourcesFromRequests(reqContainers)
+	// PERF measurement disabled.
+	// slog.Info("perf.stage", slog.String("sandbox", sbx.ID), slog.String("stage", "pod.aggregate_resources"), slog.Duration("duration", time.Since(t)))
 	if err != nil {
 		return "", "", nil, err
 	}
 
+	// t = time.Now()
 	cgroupParent, err := ensureSandboxParentCgroup(s.cfg.CgroupParent, sbx.ID, podRes)
+	// PERF measurement disabled.
+	// slog.Info("perf.stage", slog.String("sandbox", sbx.ID), slog.String("stage", "pod.ensure_parent_cgroup"), slog.Duration("duration", time.Since(t)))
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -63,19 +74,30 @@ func (s *Service) createPodSandboxCRI(ctx context.Context, sbx *model.Sandbox, r
 		cfg.Annotations["dev.gvisor.flag.overlay2"] = fmt.Sprintf("root:self,size=%d", rootfsBytes)
 	}
 
+	// t = time.Now()
 	podID, err := s.cri.runPodSandbox(ctx, cfg, s.runtimeBinary)
+	// PERF measurement disabled.
+	// slog.Info("perf.stage", slog.String("sandbox", sbx.ID), slog.String("stage", "pod.run_pod_sandbox"), slog.Duration("duration", time.Since(t)))
 	if err != nil {
 		return "", "", nil, err
 	}
 
+	// t = time.Now()
 	if err := enforceCgroupV2Limits(podID, podRes); err != nil {
 		return "", "", nil, err
 	}
+	// PERF measurement disabled.
+	// slog.Info("perf.stage", slog.String("sandbox", sbx.ID), slog.String("stage", "pod.enforce_cgroup_limits"), slog.Duration("duration", time.Since(t)))
 
+	// t = time.Now()
 	status, err := s.cri.podSandboxStatus(ctx, podID)
+	// PERF measurement disabled.
+	// slog.Info("perf.stage", slog.String("sandbox", sbx.ID), slog.String("stage", "pod.status_query"), slog.Duration("duration", time.Since(t)))
 	if err != nil {
 		return "", "", nil, err
 	}
+	// PERF measurement disabled.
+	// slog.Info("perf.stage", slog.String("sandbox", sbx.ID), slog.String("stage", "pod.create_total"), slog.Duration("duration", time.Since(t0)))
 
 	return podID, status.GetNetwork().GetIp(), cfg, nil
 }
@@ -349,6 +371,8 @@ func findCgroupV2PathByID(id string) (string, error) {
 }
 
 func (s *Service) createAndStartCRIContainer(ctx context.Context, sbx *model.Sandbox, podID string, sbxCfg *runtimeapi.PodSandboxConfig, c model.CreateContainerRequest, lim model.ResourceLimits) (model.ContainerState, error) {
+	// PERF measurement disabled.
+	// t0 := time.Now()
 	envs := make([]*runtimeapi.KeyValue, 0, len(c.Env))
 	for _, kv := range c.Env {
 		parts := strings.SplitN(kv, "=", 2)
@@ -360,7 +384,10 @@ func (s *Service) createAndStartCRIContainer(ctx context.Context, sbx *model.San
 	}
 
 	mounts := []*runtimeapi.Mount{}
+	// t := time.Now()
 	tmpHostPath, err := s.ensureSandboxTmpfsMount(sbx.ID, c.Name, "tmp", lim.TmpfsBytes)
+	// PERF measurement disabled.
+	// slog.Info("perf.stage", slog.String("sandbox", sbx.ID), slog.String("container", c.Name), slog.String("stage", "container.ensure_tmpfs_mount"), slog.Duration("duration", time.Since(t)))
 	if err != nil {
 		return model.ContainerState{}, err
 	}
@@ -419,23 +446,37 @@ func (s *Service) createAndStartCRIContainer(ctx context.Context, sbx *model.San
 		ctrCfg.WorkingDir = c.WorkDir
 	}
 
+	// t = time.Now()
 	containerID, err := s.cri.createContainer(ctx, podID, ctrCfg, sbxCfg)
+	// PERF measurement disabled.
+	// slog.Info("perf.stage", slog.String("sandbox", sbx.ID), slog.String("container", c.Name), slog.String("stage", "container.create"), slog.Duration("duration", time.Since(t)))
 	if err != nil {
 		return model.ContainerState{}, err
 	}
 
+	// t = time.Now()
 	if err := s.cri.startContainer(ctx, containerID); err != nil {
 		return model.ContainerState{}, err
 	}
+	// PERF measurement disabled.
+	// slog.Info("perf.stage", slog.String("sandbox", sbx.ID), slog.String("container", c.Name), slog.String("stage", "container.start"), slog.Duration("duration", time.Since(t)))
 
+	// t = time.Now()
 	if err := enforceCgroupV2Limits(containerID, ctrCfg.Linux.Resources); err != nil {
 		return model.ContainerState{}, err
 	}
+	// PERF measurement disabled.
+	// slog.Info("perf.stage", slog.String("sandbox", sbx.ID), slog.String("container", c.Name), slog.String("stage", "container.enforce_cgroup_limits"), slog.Duration("duration", time.Since(t)))
 
+	// t = time.Now()
 	details, err := s.cri.containerStatus(ctx, containerID)
+	// PERF measurement disabled.
+	// slog.Info("perf.stage", slog.String("sandbox", sbx.ID), slog.String("container", c.Name), slog.String("stage", "container.status_query"), slog.Duration("duration", time.Since(t)))
 	if err != nil {
 		return model.ContainerState{}, err
 	}
+	// PERF measurement disabled.
+	// slog.Info("perf.stage", slog.String("sandbox", sbx.ID), slog.String("container", c.Name), slog.String("stage", "container.create_start_total"), slog.Duration("duration", time.Since(t0)))
 
 	return model.ContainerState{
 		ID:         details.ID,

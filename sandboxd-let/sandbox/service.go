@@ -24,6 +24,35 @@ import (
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
+type perfStageTimer struct {
+	start  time.Time
+	stages map[string]time.Duration
+}
+
+func newPerfStageTimer() *perfStageTimer {
+	return &perfStageTimer{
+		start:  time.Now(),
+		stages: make(map[string]time.Duration),
+	}
+}
+
+func (t *perfStageTimer) mark(stage string, started time.Time) {
+	// PERF measurement disabled.
+	// if t == nil {
+	// 	return
+	// }
+	// t.stages[stage] += time.Since(started)
+}
+
+func (t *perfStageTimer) total() time.Duration {
+	// PERF measurement disabled.
+	// if t == nil {
+	// 	return 0
+	// }
+	// return time.Since(t.start)
+	return 0
+}
+
 type Service struct {
 	cri            *criClient
 	ipt            *iptables.IPTables
@@ -230,7 +259,25 @@ func (s *Service) provisionSandbox(sandboxID string, req model.CreateSandboxRequ
 
 func (s *Service) provisionSandboxSync(ctx context.Context, sbx *model.Sandbox, req model.CreateSandboxRequest) (*model.Sandbox, error) {
 	ctx = namespaces.WithNamespace(ctx, s.namespace)
+	// PERF measurement disabled.
+	// perf := newPerfStageTimer()
 	created := false
+	// PERF measurement disabled.
+	// defer func() {
+	// 	attrs := []any{
+	// 		slog.String("sandbox", sbx.ID),
+	// 		slog.Int("containers", len(req.Containers)),
+	// 		slog.Bool("created", created),
+	// 		slog.Duration("total", perf.total()),
+	// 	}
+	//
+	// 	for k, v := range perf.stages {
+	// 		attrs = append(attrs, slog.Duration(k, v))
+	// 	}
+	//
+	// 	slog.Info("perf.provision_sandbox", attrs...)
+	// }()
+
 	defer func() {
 		if created {
 			return
@@ -247,9 +294,11 @@ func (s *Service) provisionSandboxSync(ctx context.Context, sbx *model.Sandbox, 
 		_ = s.deleteSandboxRuntimeArtifacts(namespaces.WithNamespace(cctx, s.namespace), sbx)
 	}()
 
+	// stageStart := time.Now()
 	pauseCtx, pauseCancel := context.WithTimeout(ctx, s.cfg.ContainerCreateTimeout)
 	podID, assignedIP, podCfg, err := s.createPodSandboxCRI(pauseCtx, sbx, req.Containers)
 	pauseCancel()
+	// perf.mark("pod_sandbox_create_total", stageStart)
 	if err != nil {
 		sbx.Error = err.Error()
 		return nil, err
@@ -259,7 +308,9 @@ func (s *Service) provisionSandboxSync(ctx context.Context, sbx *model.Sandbox, 
 
 	for _, c := range req.Containers {
 		s.dbg("create container sandbox=%s name=%s image=%s", sbx.ID, c.Name, c.Image)
+		// stageStart = time.Now()
 		parsedRes, err := parseContainerResource(c.Resource)
+		// perf.mark("container_resource_parse", stageStart)
 		if err != nil {
 			err = fmt.Errorf("container %s: %w", c.Name, err)
 			sbx.Error = err.Error()
@@ -269,18 +320,22 @@ func (s *Service) provisionSandboxSync(ctx context.Context, sbx *model.Sandbox, 
 		lim := parsedResourceToLimits(parsedRes)
 		s.applyEphemeralLimits(&lim, parsedRes)
 
+		// stageStart = time.Now()
 		pullCtx, pullCancel := context.WithTimeout(ctx, s.cfg.ImagePullTimeout)
 		pullErr := s.cri.pullImage(pullCtx, normalizeImage(c.Image))
 		pullCancel()
+		// perf.mark("container_image_pull", stageStart)
 		if pullErr != nil {
 			err = fmt.Errorf("pull image %q: %w", normalizeImage(c.Image), pullErr)
 			sbx.Error = err.Error()
 			return nil, err
 		}
 
+		// stageStart = time.Now()
 		ctrCtx, ctrCancel := context.WithTimeout(ctx, s.cfg.ContainerCreateTimeout)
 		st, err := s.createAndStartCRIContainer(ctrCtx, sbx, podID, podCfg, c, lim)
 		ctrCancel()
+		// perf.mark("container_create_start_total", stageStart)
 		if err != nil {
 			sbx.Error = err.Error()
 			return nil, err
@@ -294,9 +349,11 @@ func (s *Service) provisionSandboxSync(ctx context.Context, sbx *model.Sandbox, 
 	}
 	s.dbg("resolved ip sandbox=%s ip=%s", sbx.ID, sbx.IP)
 
+	// stageStart = time.Now()
 	if err := s.applySandboxNetworkPolicy(sbx); err != nil {
 		return nil, err
 	}
+	// perf.mark("network_policy_apply", stageStart)
 	s.dbg("network policy applied sandbox=%s", sbx.ID)
 
 	readyTimeout := s.cfg.ContainerCreateTimeout
@@ -305,24 +362,32 @@ func (s *Service) provisionSandboxSync(ctx context.Context, sbx *model.Sandbox, 
 	}
 	readyCtx, readyCancel := context.WithTimeout(ctx, readyTimeout)
 	defer readyCancel()
+	// stageStart = time.Now()
 	if err := s.waitSandboxReady(readyCtx, sbx); err != nil {
 		return nil, err
 	}
+	// perf.mark("wait_sandbox_ready", stageStart)
 
+	// stageStart = time.Now()
 	if err := s.applyHostPortPublish(sbx); err != nil {
 		return nil, err
 	}
+	// perf.mark("hostport_publish_apply", stageStart)
 
 	s.dbg("hostport publish applied sandbox=%s", sbx.ID)
 	// Published TCP readiness is best-effort; runtime task readiness is the
 	// primary success signal. Some images open ports slightly after task start.
+	// stageStart = time.Now()
 	_ = s.waitPublishedTCPReady(sbx)
+	// perf.mark("wait_published_tcp_ready", stageStart)
 
+	// stageStart = time.Now()
 	s.refreshSandboxRuntimeState(ctx, sbx)
 	setSandboxPhase(sbx, SandboxPhaseRunning, "")
 	if err := s.store.Save(sbx); err != nil {
 		return nil, err
 	}
+	// perf.mark("state_refresh_and_save_running", stageStart)
 	s.dbg("sandbox running saved sandbox=%s", sbx.ID)
 
 	created = true
