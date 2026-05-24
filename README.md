@@ -752,9 +752,9 @@ This metric reflects the perceived provisioning time from the user/control-plane
 The test was conducted by repeatedly creating and deleting the same sandbox specification **45 times**, and the collected data was analyzed using **p50**, **p95**, and **p99** tail latency metrics.
 
 > [!NOTE]
-> 
+>
 > Script used for measurement:
-> 
+>
 > - `scripts/run_nginx_perf.sh`
 > - `scripts/run_resource_sweep_full.py`
 
@@ -859,14 +859,14 @@ This is because the application running inside the container (nginx in this exam
 
 The following results were measured using the same workload but with increased resource limits of **3500m CPU** and **8Gi memory**.
 
-| metric                       | 기본 (200m/256Mi) | 완화 (3500m/8Gi) | 차이(완화-기본) |
-| ---------------------------- | ----------------: | ---------------: | --------------: |
-| total                        |          5927.704 |         1194.348 |       -4733.356 |
-| pod_sandbox_create_total     |          1145.843 |          306.458 |        -839.385 |
-| container_create_start_total |           811.175 |          280.107 |        -531.068 |
-| network_policy_apply         |           114.914 |           85.990 |         -28.924 |
-| hostport_publish_apply       |            19.961 |           19.285 |          -0.676 |
-| wait_published_tcp_ready     |          3783.487 |          456.029 |       -3327.458 |
+| metric                       | Default (200m / 256Mi) | Relaxed (3500m / 8Gi) | Difference (Relaxed − Default) |
+| ---------------------------- | ---------------------: | --------------------: | -----------------------------: |
+| total                        |               5927.704 |              1194.348 |                      -4733.356 |
+| pod_sandbox_create_total     |               1145.843 |               306.458 |                       -839.385 |
+| container_create_start_total |                811.175 |               280.107 |                       -531.068 |
+| network_policy_apply         |                114.914 |                85.990 |                        -28.924 |
+| hostport_publish_apply       |                 19.961 |                19.285 |                         -0.676 |
+| wait_published_tcp_ready     |               3783.487 |               456.029 |                      -3327.458 |
 
 > [!WARNING]
 >
