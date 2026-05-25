@@ -1,5 +1,3 @@
-# wargame_pwntools_basic_test_v4:latest
-
 apiVersion: sandboxd.o/v1
 kind: Sandbox
 id: sbx-nginx

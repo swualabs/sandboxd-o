@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -624,6 +625,68 @@ func TestCreateSandboxValidationAndTTLFailure(t *testing.T) {
 	})
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("expected invalid readiness http path input, got=%v", err)
+	}
+}
+
+func TestCreateSandboxValidation_ReadinessThresholdFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer server.Close()
+	s := newServiceWithNode(t, server)
+	defer s.Close()
+
+	validProbe := func() *types.ReadinessProbeSpec {
+		return &types.ReadinessProbeSpec{
+			Protocol:            "http",
+			Port:                8080,
+			Path:                "/healthz",
+			InitialDelaySeconds: 1,
+			PeriodSeconds:       1,
+			TimeoutSeconds:      1,
+			SuccessThreshold:    1,
+			FailureThreshold:    1,
+		}
+	}
+
+	cases := []struct {
+		name      string
+		mutate    func(*types.ReadinessProbeSpec)
+		shouldErr bool
+	}{
+		{name: "initial delay invalid", mutate: func(p *types.ReadinessProbeSpec) { p.InitialDelaySeconds = 0 }, shouldErr: true},
+		{name: "period invalid", mutate: func(p *types.ReadinessProbeSpec) { p.PeriodSeconds = 0 }, shouldErr: true},
+		{name: "timeout invalid", mutate: func(p *types.ReadinessProbeSpec) { p.TimeoutSeconds = 0 }, shouldErr: true},
+		{name: "success threshold invalid", mutate: func(p *types.ReadinessProbeSpec) { p.SuccessThreshold = 0 }, shouldErr: true},
+		{name: "failure threshold invalid", mutate: func(p *types.ReadinessProbeSpec) { p.FailureThreshold = 0 }, shouldErr: true},
+		{name: "tcp path optional", mutate: func(p *types.ReadinessProbeSpec) { p.Protocol, p.Path = "tcp", "" }, shouldErr: false},
+		{name: "http path slash required", mutate: func(p *types.ReadinessProbeSpec) { p.Path = "healthz" }, shouldErr: true},
+	}
+
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := validProbe()
+			tc.mutate(p)
+			_, err := s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
+				ID: fmt.Sprintf("readiness-case-%d", i),
+				Spec: types.SandboxSpec{
+					Containers: []types.SandboxContainerSpec{{
+						Name:     "c",
+						Image:    "nginx",
+						Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"},
+					}},
+					ReadinessProbe: p,
+				},
+			})
+
+			if tc.shouldErr && !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("expected ErrInvalidInput, got=%v", err)
+			}
+
+			if !tc.shouldErr && err != nil {
+				t.Fatalf("expected success, got=%v", err)
+			}
+		})
 	}
 }
 
