@@ -15,6 +15,52 @@ const docTemplateorchestrator = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/v1/externals": {
+            "post": {
+                "description": "Sets a single external endpoint for one node (1:1 per node).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "orchestrator-node"
+                ],
+                "summary": "Create/Update external object",
+                "parameters": [
+                    {
+                        "description": "External object request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/types.CreateExternalObjectRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.HealthResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/nodes": {
             "get": {
                 "description": "Lists all registered nodes with state and latest resource data.",
@@ -39,11 +85,9 @@ const docTemplateorchestrator = `{
                         }
                     }
                 }
-            }
-        },
-        "/api/v1/nodes/register": {
+            },
             "post": {
-                "description": "Registers or updates a sandboxd node endpoint.",
+                "description": "Creates or updates a node object from id/spec(ip,port).",
                 "consumes": [
                     "application/json"
                 ],
@@ -53,15 +97,15 @@ const docTemplateorchestrator = `{
                 "tags": [
                     "orchestrator-node"
                 ],
-                "summary": "Register node",
+                "summary": "Create/Update node object",
                 "parameters": [
                     {
-                        "description": "Node registration request",
+                        "description": "Node object request",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.RegisterNodeRequest"
+                            "$ref": "#/definitions/types.CreateNodeObjectRequest"
                         }
                     }
                 ],
@@ -87,7 +131,7 @@ const docTemplateorchestrator = `{
                 }
             }
         },
-        "/api/v1/nodes/{name}": {
+        "/api/v1/nodes/{id}": {
             "get": {
                 "description": "Returns a single node by name.",
                 "produces": [
@@ -100,16 +144,10 @@ const docTemplateorchestrator = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Node name",
-                        "name": "name",
+                        "description": "Node id",
+                        "name": "id",
                         "in": "path",
                         "required": true
-                    },
-                    {
-                        "type": "boolean",
-                        "description": "Force delete without node API calls (use only when node is already gone)",
-                        "name": "force",
-                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -145,10 +183,16 @@ const docTemplateorchestrator = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Node name",
-                        "name": "name",
+                        "description": "Node id",
+                        "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Force delete without node API calls (use only when node is already gone)",
+                        "name": "force",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -173,7 +217,7 @@ const docTemplateorchestrator = `{
                 }
             }
         },
-        "/api/v1/nodes/{name}/heartbeat": {
+        "/api/v1/nodes/{id}/heartbeat": {
             "post": {
                 "description": "Probes sandboxd health and node resources immediately.",
                 "produces": [
@@ -186,8 +230,8 @@ const docTemplateorchestrator = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Node name",
-                        "name": "name",
+                        "description": "Node id",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     }
@@ -214,7 +258,7 @@ const docTemplateorchestrator = `{
                 }
             }
         },
-        "/api/v1/nodes/{name}/reconcile": {
+        "/api/v1/nodes/{id}/reconcile": {
             "post": {
                 "description": "Proxies manual reconcile trigger to selected node sandboxd.",
                 "produces": [
@@ -227,8 +271,8 @@ const docTemplateorchestrator = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Node name",
-                        "name": "name",
+                        "description": "Node id",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     }
@@ -255,7 +299,7 @@ const docTemplateorchestrator = `{
                 }
             }
         },
-        "/api/v1/nodes/{name}/sandboxes": {
+        "/api/v1/nodes/{id}/sandboxes": {
             "get": {
                 "description": "Proxies sandbox list request to selected node sandboxd.",
                 "produces": [
@@ -268,8 +312,8 @@ const docTemplateorchestrator = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Node name",
-                        "name": "name",
+                        "description": "Node id",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     },
@@ -322,8 +366,8 @@ const docTemplateorchestrator = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Node name",
-                        "name": "name",
+                        "description": "Node id",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     },
@@ -365,7 +409,7 @@ const docTemplateorchestrator = `{
                 }
             }
         },
-        "/api/v1/nodes/{name}/sandboxes/{id}": {
+        "/api/v1/nodes/{id}/sandboxes/{sandboxId}": {
             "get": {
                 "description": "Proxies sandbox detail request to selected node sandboxd.",
                 "produces": [
@@ -378,15 +422,15 @@ const docTemplateorchestrator = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Node name",
-                        "name": "name",
+                        "description": "Node id",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     },
                     {
                         "type": "string",
                         "description": "Sandbox ID",
-                        "name": "id",
+                        "name": "sandboxId",
                         "in": "path",
                         "required": true
                     }
@@ -424,15 +468,15 @@ const docTemplateorchestrator = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Node name",
-                        "name": "name",
+                        "description": "Node id",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     },
                     {
                         "type": "string",
                         "description": "Sandbox ID",
-                        "name": "id",
+                        "name": "sandboxId",
                         "in": "path",
                         "required": true
                     }
@@ -459,7 +503,7 @@ const docTemplateorchestrator = `{
                 }
             }
         },
-        "/api/v1/nodes/{name}/sandboxes/{id}/containers/{container}/logs": {
+        "/api/v1/nodes/{id}/sandboxes/{sandboxId}/containers/{container}/logs": {
             "get": {
                 "description": "Proxies container logs request to selected node sandboxd.",
                 "produces": [
@@ -472,15 +516,15 @@ const docTemplateorchestrator = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Node name",
-                        "name": "name",
+                        "description": "Node id",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     },
                     {
                         "type": "string",
                         "description": "Sandbox ID",
-                        "name": "id",
+                        "name": "sandboxId",
                         "in": "path",
                         "required": true
                     },
@@ -826,7 +870,7 @@ const docTemplateorchestrator = `{
                 "resource": {
                     "$ref": "#/definitions/model.ResourceSpec"
                 },
-                "work_dir": {
+                "workDir": {
                     "type": "string"
                 }
             }
@@ -851,20 +895,52 @@ const docTemplateorchestrator = `{
                     "items": {
                         "$ref": "#/definitions/model.PortMapping"
                     }
+                },
+                "readinessProbe": {
+                    "$ref": "#/definitions/model.ReadinessProbeSpec"
                 }
             }
         },
         "model.PortMapping": {
             "type": "object",
             "properties": {
-                "container_port": {
+                "containerPort": {
                     "type": "integer"
                 },
-                "host_port": {
+                "hostPort": {
                     "type": "integer"
                 },
                 "protocol": {
                     "type": "string"
+                }
+            }
+        },
+        "model.ReadinessProbeSpec": {
+            "type": "object",
+            "properties": {
+                "failureThreshold": {
+                    "type": "integer"
+                },
+                "initialDelaySeconds": {
+                    "type": "integer"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "periodSeconds": {
+                    "type": "integer"
+                },
+                "port": {
+                    "type": "integer"
+                },
+                "protocol": {
+                    "type": "string"
+                },
+                "successThreshold": {
+                    "type": "integer"
+                },
+                "timeoutSeconds": {
+                    "type": "integer"
                 }
             }
         },
@@ -874,8 +950,33 @@ const docTemplateorchestrator = `{
                 "cpu": {
                     "type": "string"
                 },
+                "ephemeralStorage": {
+                    "type": "string"
+                },
                 "memory": {
                     "type": "string"
+                }
+            }
+        },
+        "types.CreateExternalObjectRequest": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "spec": {
+                    "$ref": "#/definitions/types.ExternalObjectSpec"
+                }
+            }
+        },
+        "types.CreateNodeObjectRequest": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "spec": {
+                    "$ref": "#/definitions/types.NodeObjectSpec"
                 }
             }
         },
@@ -890,6 +991,17 @@ const docTemplateorchestrator = `{
                 }
             }
         },
+        "types.ExternalObjectSpec": {
+            "type": "object",
+            "properties": {
+                "external": {
+                    "type": "string"
+                },
+                "node_id": {
+                    "type": "string"
+                }
+            }
+        },
         "types.Node": {
             "type": "object",
             "properties": {
@@ -899,6 +1011,9 @@ const docTemplateorchestrator = `{
                 "failure_streak": {
                     "type": "integer"
                 },
+                "id": {
+                    "type": "string"
+                },
                 "ip": {
                     "type": "string"
                 },
@@ -906,9 +1021,6 @@ const docTemplateorchestrator = `{
                     "type": "string"
                 },
                 "last_heartbeat": {
-                    "type": "string"
-                },
-                "name": {
                     "type": "string"
                 },
                 "port": {
@@ -931,6 +1043,17 @@ const docTemplateorchestrator = `{
                 },
                 "updated_at": {
                     "type": "string"
+                }
+            }
+        },
+        "types.NodeObjectSpec": {
+            "type": "object",
+            "properties": {
+                "ip": {
+                    "type": "string"
+                },
+                "port": {
+                    "type": "integer"
                 }
             }
         },
@@ -982,16 +1105,31 @@ const docTemplateorchestrator = `{
                 "NodeStateNotReady"
             ]
         },
-        "types.RegisterNodeRequest": {
+        "types.ReadinessProbeSpec": {
             "type": "object",
             "properties": {
-                "ip": {
+                "failure_threshold": {
+                    "type": "integer"
+                },
+                "initial_delay_seconds": {
+                    "type": "integer"
+                },
+                "path": {
                     "type": "string"
                 },
-                "name": {
-                    "type": "string"
+                "period_seconds": {
+                    "type": "integer"
                 },
                 "port": {
+                    "type": "integer"
+                },
+                "protocol": {
+                    "type": "string"
+                },
+                "success_threshold": {
+                    "type": "integer"
+                },
+                "timeout_seconds": {
                     "type": "integer"
                 }
             }
@@ -1099,6 +1237,9 @@ const docTemplateorchestrator = `{
                 "cpu": {
                     "type": "string"
                 },
+                "ephemeral_storage": {
+                    "type": "string"
+                },
                 "memory": {
                     "type": "string"
                 }
@@ -1122,6 +1263,9 @@ const docTemplateorchestrator = `{
                         "$ref": "#/definitions/types.SandboxPortSpec"
                     }
                 },
+                "readiness_probe": {
+                    "$ref": "#/definitions/types.ReadinessProbeSpec"
+                },
                 "ttl_seconds": {
                     "type": "integer"
                 }
@@ -1137,6 +1281,9 @@ const docTemplateorchestrator = `{
                     }
                 },
                 "expire_at": {
+                    "type": "string"
+                },
+                "ip": {
                     "type": "string"
                 },
                 "last_error": {
@@ -1162,8 +1309,8 @@ var SwaggerInfoorchestrator = &swag.Spec{
 	Host:             "",
 	BasePath:         "/",
 	Schemes:          []string{"http"},
-	Title:            "Orchestrator API",
-	Description:      "Control-plane API for node registration, health probing, sandbox scheduling objects, and node proxy operations.",
+	Title:            "Orchestrator API Server",
+	Description:      "",
 	InfoInstanceName: "orchestrator",
 	SwaggerTemplate:  docTemplateorchestrator,
 	LeftDelim:        "{{",

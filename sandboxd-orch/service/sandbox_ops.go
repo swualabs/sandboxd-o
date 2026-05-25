@@ -176,6 +176,53 @@ func validateSandboxCreate(req types.CreateSandboxObjectRequest) error {
 		}
 	}
 
+	if req.Spec.ReadinessProbe != nil {
+		probe := req.Spec.ReadinessProbe
+		proto := strings.ToLower(strings.TrimSpace(probe.Protocol))
+		if proto == "" {
+			return fmt.Errorf("%w: readiness_probe.protocol is required", ErrInvalidInput)
+		}
+
+		if proto != "tcp" && proto != "http" {
+			return fmt.Errorf("%w: readiness_probe.protocol must be tcp or http", ErrInvalidInput)
+		}
+
+		if probe.Port < 1 || probe.Port > 65535 {
+			return fmt.Errorf("%w: readiness_probe.port must be between 1 and 65535", ErrInvalidInput)
+		}
+
+		if proto == "http" {
+			path := strings.TrimSpace(probe.Path)
+			if path == "" {
+				return fmt.Errorf("%w: readiness_probe.path is required when protocol is http", ErrInvalidInput)
+			}
+
+			if !strings.HasPrefix(path, "/") {
+				return fmt.Errorf("%w: readiness_probe.path must start with '/' when protocol is http", ErrInvalidInput)
+			}
+		}
+
+		if probe.InitialDelaySeconds < 1 {
+			return fmt.Errorf("%w: readiness_probe.initial_delay_seconds must be >= 1", ErrInvalidInput)
+		}
+
+		if probe.PeriodSeconds < 1 {
+			return fmt.Errorf("%w: readiness_probe.period_seconds must be >= 1", ErrInvalidInput)
+		}
+
+		if probe.TimeoutSeconds < 1 {
+			return fmt.Errorf("%w: readiness_probe.timeout_seconds must be >= 1", ErrInvalidInput)
+		}
+
+		if probe.SuccessThreshold < 1 {
+			return fmt.Errorf("%w: readiness_probe.success_threshold must be >= 1", ErrInvalidInput)
+		}
+
+		if probe.FailureThreshold < 1 {
+			return fmt.Errorf("%w: readiness_probe.failure_threshold must be >= 1", ErrInvalidInput)
+		}
+	}
+
 	return nil
 }
 
@@ -310,7 +357,7 @@ func (s *Service) scheduleOne(ctx context.Context, sbx types.Sandbox) {
 		}
 	}
 
-	fresh.Status.Phase = types.SandboxPhaseRunning
+	fresh.Status.Phase = types.SandboxPhaseScheduled
 	fresh.Status.LastError = ""
 	if ip := s.fetchSandboxIPOnce(ctx, fresh.Status.NodeName, fresh.ID); ip != "" {
 		fresh.Status.IP = ip
@@ -404,6 +451,19 @@ func (s *Service) createSandboxOnNode(ctx context.Context, sbx types.Sandbox) er
 				EphemeralStorage: c.Resource.EphemeralStorage,
 			},
 		})
+	}
+
+	if sbx.Spec.ReadinessProbe != nil {
+		req.Readiness = &model.ReadinessProbeSpec{
+			Protocol:            sbx.Spec.ReadinessProbe.Protocol,
+			Port:                sbx.Spec.ReadinessProbe.Port,
+			Path:                sbx.Spec.ReadinessProbe.Path,
+			InitialDelaySeconds: sbx.Spec.ReadinessProbe.InitialDelaySeconds,
+			PeriodSeconds:       sbx.Spec.ReadinessProbe.PeriodSeconds,
+			TimeoutSeconds:      sbx.Spec.ReadinessProbe.TimeoutSeconds,
+			SuccessThreshold:    sbx.Spec.ReadinessProbe.SuccessThreshold,
+			FailureThreshold:    sbx.Spec.ReadinessProbe.FailureThreshold,
+		}
 	}
 
 	_, err = client.CreateSandbox(ctx, req)

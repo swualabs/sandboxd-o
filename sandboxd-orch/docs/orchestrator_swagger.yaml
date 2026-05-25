@@ -75,7 +75,7 @@ definitions:
         type: string
       resource:
         $ref: '#/definitions/model.ResourceSpec'
-      work_dir:
+      workDir:
         type: string
     type: object
   model.CreateSandboxRequest:
@@ -92,22 +92,59 @@ definitions:
         items:
           $ref: '#/definitions/model.PortMapping'
         type: array
+      readinessProbe:
+        $ref: '#/definitions/model.ReadinessProbeSpec'
     type: object
   model.PortMapping:
     properties:
-      container_port:
+      containerPort:
         type: integer
-      host_port:
+      hostPort:
         type: integer
       protocol:
         type: string
+    type: object
+  model.ReadinessProbeSpec:
+    properties:
+      failureThreshold:
+        type: integer
+      initialDelaySeconds:
+        type: integer
+      path:
+        type: string
+      periodSeconds:
+        type: integer
+      port:
+        type: integer
+      protocol:
+        type: string
+      successThreshold:
+        type: integer
+      timeoutSeconds:
+        type: integer
     type: object
   model.ResourceSpec:
     properties:
       cpu:
         type: string
+      ephemeralStorage:
+        type: string
       memory:
         type: string
+    type: object
+  types.CreateExternalObjectRequest:
+    properties:
+      id:
+        type: string
+      spec:
+        $ref: '#/definitions/types.ExternalObjectSpec'
+    type: object
+  types.CreateNodeObjectRequest:
+    properties:
+      id:
+        type: string
+      spec:
+        $ref: '#/definitions/types.NodeObjectSpec'
     type: object
   types.CreateSandboxObjectRequest:
     properties:
@@ -116,19 +153,26 @@ definitions:
       spec:
         $ref: '#/definitions/types.SandboxSpec'
     type: object
+  types.ExternalObjectSpec:
+    properties:
+      external:
+        type: string
+      node_id:
+        type: string
+    type: object
   types.Node:
     properties:
       created_at:
         type: string
       failure_streak:
         type: integer
+      id:
+        type: string
       ip:
         type: string
       last_error:
         type: string
       last_heartbeat:
-        type: string
-      name:
         type: string
       port:
         type: integer
@@ -144,6 +188,13 @@ definitions:
         type: integer
       updated_at:
         type: string
+    type: object
+  types.NodeObjectSpec:
+    properties:
+      ip:
+        type: string
+      port:
+        type: integer
     type: object
   types.NodeResources:
     properties:
@@ -178,13 +229,23 @@ definitions:
     - NodeStateUnknown
     - NodeStateReady
     - NodeStateNotReady
-  types.RegisterNodeRequest:
+  types.ReadinessProbeSpec:
     properties:
-      ip:
+      failure_threshold:
+        type: integer
+      initial_delay_seconds:
+        type: integer
+      path:
         type: string
-      name:
-        type: string
+      period_seconds:
+        type: integer
       port:
+        type: integer
+      protocol:
+        type: string
+      success_threshold:
+        type: integer
+      timeout_seconds:
         type: integer
     type: object
   types.Sandbox:
@@ -257,6 +318,8 @@ definitions:
     properties:
       cpu:
         type: string
+      ephemeral_storage:
+        type: string
       memory:
         type: string
     type: object
@@ -272,6 +335,8 @@ definitions:
         items:
           $ref: '#/definitions/types.SandboxPortSpec'
         type: array
+      readiness_probe:
+        $ref: '#/definitions/types.ReadinessProbeSpec'
       ttl_seconds:
         type: integer
     type: object
@@ -282,6 +347,8 @@ definitions:
           $ref: '#/definitions/types.SandboxPortAssign'
         type: array
       expire_at:
+        type: string
+      ip:
         type: string
       last_error:
         type: string
@@ -294,11 +361,39 @@ definitions:
     type: object
 info:
   contact: {}
-  description: Control-plane API for node registration, health probing, sandbox scheduling
-    objects, and node proxy operations.
-  title: Orchestrator API
+  title: Orchestrator API Server
   version: "1.0"
 paths:
+  /api/v1/externals:
+    post:
+      consumes:
+      - application/json
+      description: Sets a single external endpoint for one node (1:1 per node).
+      parameters:
+      - description: External object request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/types.CreateExternalObjectRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.HealthResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create/Update external object
+      tags:
+      - orchestrator-node
   /api/v1/nodes:
     get:
       description: Lists all registered nodes with state and latest resource data.
@@ -316,17 +411,47 @@ paths:
       summary: List nodes
       tags:
       - orchestrator-node
-  /api/v1/nodes/{name}:
+    post:
+      consumes:
+      - application/json
+      description: Creates or updates a node object from id/spec(ip,port).
+      parameters:
+      - description: Node object request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/types.CreateNodeObjectRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.NodeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create/Update node object
+      tags:
+      - orchestrator-node
+  /api/v1/nodes/{id}:
     delete:
       description: Deletes node registration and detaches related sandbox scheduling
         metadata.
       parameters:
-      - description: Node name
+      - description: Node id
         in: path
-        name: name
+        name: id
         required: true
         type: string
-      - description: Force delete without node API calls (use only when node is already gone)
+      - description: Force delete without node API calls (use only when node is already
+          gone)
         in: query
         name: force
         type: boolean
@@ -351,9 +476,9 @@ paths:
     get:
       description: Returns a single node by name.
       parameters:
-      - description: Node name
+      - description: Node id
         in: path
-        name: name
+        name: id
         required: true
         type: string
       produces:
@@ -374,13 +499,13 @@ paths:
       summary: Get node
       tags:
       - orchestrator-node
-  /api/v1/nodes/{name}/heartbeat:
+  /api/v1/nodes/{id}/heartbeat:
     post:
       description: Probes sandboxd health and node resources immediately.
       parameters:
-      - description: Node name
+      - description: Node id
         in: path
-        name: name
+        name: id
         required: true
         type: string
       produces:
@@ -401,13 +526,13 @@ paths:
       summary: Trigger node heartbeat
       tags:
       - orchestrator-node
-  /api/v1/nodes/{name}/reconcile:
+  /api/v1/nodes/{id}/reconcile:
     post:
       description: Proxies manual reconcile trigger to selected node sandboxd.
       parameters:
-      - description: Node name
+      - description: Node id
         in: path
-        name: name
+        name: id
         required: true
         type: string
       produces:
@@ -428,13 +553,13 @@ paths:
       summary: Proxy reconcile
       tags:
       - orchestrator-proxy
-  /api/v1/nodes/{name}/sandboxes:
+  /api/v1/nodes/{id}/sandboxes:
     get:
       description: Proxies sandbox list request to selected node sandboxd.
       parameters:
-      - description: Node name
+      - description: Node id
         in: path
-        name: name
+        name: id
         required: true
         type: string
       - description: Pagination cursor
@@ -468,9 +593,9 @@ paths:
       - application/json
       description: Proxies create-sandbox request directly to selected node sandboxd.
       parameters:
-      - description: Node name
+      - description: Node id
         in: path
-        name: name
+        name: id
         required: true
         type: string
       - description: Sandbox create request
@@ -501,18 +626,18 @@ paths:
       summary: Proxy create sandbox
       tags:
       - orchestrator-proxy
-  /api/v1/nodes/{name}/sandboxes/{id}:
+  /api/v1/nodes/{id}/sandboxes/{sandboxId}:
     delete:
       description: Proxies delete-sandbox request to selected node sandboxd.
       parameters:
-      - description: Node name
+      - description: Node id
         in: path
-        name: name
+        name: id
         required: true
         type: string
       - description: Sandbox ID
         in: path
-        name: id
+        name: sandboxId
         required: true
         type: string
       produces:
@@ -536,14 +661,14 @@ paths:
     get:
       description: Proxies sandbox detail request to selected node sandboxd.
       parameters:
-      - description: Node name
+      - description: Node id
         in: path
-        name: name
+        name: id
         required: true
         type: string
       - description: Sandbox ID
         in: path
-        name: id
+        name: sandboxId
         required: true
         type: string
       produces:
@@ -564,18 +689,18 @@ paths:
       summary: Proxy get sandbox
       tags:
       - orchestrator-proxy
-  /api/v1/nodes/{name}/sandboxes/{id}/containers/{container}/logs:
+  /api/v1/nodes/{id}/sandboxes/{sandboxId}/containers/{container}/logs:
     get:
       description: Proxies container logs request to selected node sandboxd.
       parameters:
-      - description: Node name
+      - description: Node id
         in: path
-        name: name
+        name: id
         required: true
         type: string
       - description: Sandbox ID
         in: path
-        name: id
+        name: sandboxId
         required: true
         type: string
       - description: Container name
@@ -609,36 +734,6 @@ paths:
       summary: Proxy container logs
       tags:
       - orchestrator-proxy
-  /api/v1/nodes/register:
-    post:
-      consumes:
-      - application/json
-      description: Registers or updates a sandboxd node endpoint.
-      parameters:
-      - description: Node registration request
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/types.RegisterNodeRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.NodeResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Register node
-      tags:
-      - orchestrator-node
   /api/v1/sandboxes:
     get:
       description: Lists orchestrator sandbox objects and their scheduling status.

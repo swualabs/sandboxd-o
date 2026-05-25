@@ -242,6 +242,16 @@ Create a control-plane sandbox object for scheduling and reconciliation.
                 "protocol": "tcp"
             }
         ],
+        "readiness_probe": {
+            "protocol": "http",
+            "port": 80,
+            "path": "/",
+            "initial_delay_seconds": 1,
+            "period_seconds": 1,
+            "timeout_seconds": 1,
+            "success_threshold": 2,
+            "failure_threshold": 3
+        },
         "containers": [
             {
                 "name": "web",
@@ -259,6 +269,10 @@ Create a control-plane sandbox object for scheduling and reconciliation.
     }
 }
 ```
+
+- `spec.readiness_probe` is optional.
+- If set, all readiness probe fields are required.
+- `protocol` supports `tcp` and `http`. If `http` is used, `path` is required and must start with `/`.
 
 **Response**
 

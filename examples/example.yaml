@@ -2,20 +2,29 @@
 
 apiVersion: sandboxd.o/v1
 kind: Sandbox
-id: sbx-pwntools-basic-test-v4
+id: sbx-nginx
 spec:
   egress: true
   ttl_seconds: 3600
   ports:
-    - container_port: 31337
+    - container_port: 80
       protocol: tcp
+  readiness_probe:
+    protocol: http
+    path: /
+    port: 80
+    initial_delay_seconds: 10
+    period_seconds: 5
+    timeout_seconds: 1
+    success_threshold: 1
+    failure_threshold: 5
   containers:
-    - name: pwntools_basic_test_v4
-      image: wargame_pwntools_basic_test_v4:latest
+    - name: app
+      image: nginx:latest
       args: []
       env: []
       work_dir: ""
       resource:
-        cpu: 50m
+        cpu: 150m
         memory: 64Mi
         ephemeral_storage: 96Mi

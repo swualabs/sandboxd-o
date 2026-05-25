@@ -45,3 +45,34 @@ func TestValidate_PortRules(t *testing.T) {
 		t.Fatal("expected protocol error")
 	}
 }
+
+func TestValidate_ReadinessProbeRules(t *testing.T) {
+	r := validReq()
+	r.Readiness = &ReadinessProbeSpec{
+		Protocol:            "http",
+		Port:                8080,
+		Path:                "/healthz",
+		InitialDelaySeconds: 1,
+		PeriodSeconds:       1,
+		TimeoutSeconds:      1,
+		SuccessThreshold:    1,
+		FailureThreshold:    1,
+	}
+	if err := r.Validate(); err != nil {
+		t.Fatalf("expected valid http readiness, got err=%v", err)
+	}
+
+	r = validReq()
+	r.Readiness = &ReadinessProbeSpec{
+		Protocol:            "http",
+		Port:                8080,
+		InitialDelaySeconds: 1,
+		PeriodSeconds:       1,
+		TimeoutSeconds:      1,
+		SuccessThreshold:    1,
+		FailureThreshold:    1,
+	}
+	if err := r.Validate(); err == nil {
+		t.Fatal("expected http readiness path validation error")
+	}
+}

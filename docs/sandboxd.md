@@ -65,6 +65,16 @@ Base URL: `http://localhost:8080`
             "protocol": "tcp"
         }
     ],
+    "readinessProbe": {
+        "protocol": "http",
+        "port": 8080,
+        "path": "/healthz",
+        "initialDelaySeconds": 1,
+        "periodSeconds": 1,
+        "timeoutSeconds": 1,
+        "successThreshold": 2,
+        "failureThreshold": 3
+    },
     "containers": [
         {
             "name": "web",
@@ -97,6 +107,11 @@ Base URL: `http://localhost:8080`
     ]
 }
 ```
+
+- `readinessProbe` is optional.
+- If provided, all fields inside `readinessProbe` are required.
+- `protocol` supports `tcp` and `http`.
+- If `protocol` is `http`, `path` is required and must start with `/`.
 
 **Response (Accepted)**
 

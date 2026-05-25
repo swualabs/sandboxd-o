@@ -165,6 +165,52 @@ const docTemplatesandboxd = `{
                 }
             }
         },
+        "/v1/sandboxes/statuses": {
+            "post": {
+                "description": "Returns lightweight sandbox/container status summaries for requested IDs.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sandboxd-sandbox"
+                ],
+                "summary": "Batch get sandbox status summary",
+                "parameters": [
+                    {
+                        "description": "Sandbox status request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/httpserver.SandboxStatusesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/httpserver.SandboxStatusesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/httpserver.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/httpserver.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/sandboxes/{id}": {
             "get": {
                 "description": "Returns current sandbox state, including phase and container runtime status.",
@@ -321,6 +367,23 @@ const docTemplatesandboxd = `{
                 }
             }
         },
+        "httpserver.ContainerSyncStatus": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "phase": {
+                    "type": "string"
+                },
+                "task_status": {
+                    "type": "string"
+                }
+            }
+        },
         "httpserver.CreateSandboxResponse": {
             "type": "object",
             "properties": {
@@ -394,6 +457,57 @@ const docTemplatesandboxd = `{
             "properties": {
                 "ok": {
                     "type": "boolean"
+                }
+            }
+        },
+        "httpserver.SandboxStatusesRequest": {
+            "type": "object",
+            "properties": {
+                "ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "httpserver.SandboxStatusesResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/httpserver.SandboxSyncStatus"
+                    }
+                },
+                "missing": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "httpserver.SandboxSyncStatus": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "ip": {
+                    "type": "string"
+                },
+                "phase": {
+                    "type": "string"
+                },
+                "unhealthy_containers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/httpserver.ContainerSyncStatus"
+                    }
                 }
             }
         },
@@ -490,6 +604,9 @@ const docTemplatesandboxd = `{
                     "items": {
                         "$ref": "#/definitions/model.PortMapping"
                     }
+                },
+                "readinessProbe": {
+                    "$ref": "#/definitions/model.ReadinessProbeSpec"
                 }
             }
         },
@@ -542,10 +659,42 @@ const docTemplatesandboxd = `{
                 }
             }
         },
+        "model.ReadinessProbeSpec": {
+            "type": "object",
+            "properties": {
+                "failureThreshold": {
+                    "type": "integer"
+                },
+                "initialDelaySeconds": {
+                    "type": "integer"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "periodSeconds": {
+                    "type": "integer"
+                },
+                "port": {
+                    "type": "integer"
+                },
+                "protocol": {
+                    "type": "string"
+                },
+                "successThreshold": {
+                    "type": "integer"
+                },
+                "timeoutSeconds": {
+                    "type": "integer"
+                }
+            }
+        },
         "model.ResourceSpec": {
             "type": "object",
             "properties": {
                 "cpu": {
+                    "type": "string"
+                },
+                "ephemeralStorage": {
                     "type": "string"
                 },
                 "memory": {
@@ -632,8 +781,8 @@ var SwaggerInfosandboxd = &swag.Spec{
 	Host:             "",
 	BasePath:         "/",
 	Schemes:          []string{"http"},
-	Title:            "Sandboxd API",
-	Description:      "Sandbox node agent API for gVisor-based sandbox lifecycle, runtime status, logs, and reconcile operations.",
+	Title:            "Sandboxd(Node Agent) API Server",
+	Description:      "",
 	InfoInstanceName: "sandboxd",
 	SwaggerTemplate:  docTemplatesandboxd,
 	LeftDelim:        "{{",

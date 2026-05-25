@@ -51,6 +51,18 @@ type CreateSandboxRequest struct {
 	Egress     bool                     `json:"egress"`
 	Containers []CreateContainerRequest `json:"containers"`
 	Ports      []PortMapping            `json:"ports"`
+	Readiness  *ReadinessProbeSpec      `json:"readinessProbe,omitempty"`
+}
+
+type ReadinessProbeSpec struct {
+	Protocol            string `json:"protocol"`
+	Port                int    `json:"port"`
+	Path                string `json:"path,omitempty"`
+	InitialDelaySeconds int    `json:"initialDelaySeconds"`
+	PeriodSeconds       int    `json:"periodSeconds"`
+	TimeoutSeconds      int    `json:"timeoutSeconds"`
+	SuccessThreshold    int    `json:"successThreshold"`
+	FailureThreshold    int    `json:"failureThreshold"`
 }
 
 type CreateContainerRequest struct {
