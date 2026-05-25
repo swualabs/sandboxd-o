@@ -133,7 +133,7 @@ const docTemplateorchestrator = `{
         },
         "/api/v1/nodes/{id}": {
             "get": {
-                "description": "Returns a single node by name.",
+                "description": "Returns a single node by id.",
                 "produces": [
                     "application/json"
                 ],

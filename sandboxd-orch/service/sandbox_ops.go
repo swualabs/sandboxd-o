@@ -369,7 +369,7 @@ func (s *Service) scheduleOne(ctx context.Context, sbx types.Sandbox) {
 	}
 
 	go s.refreshSandboxIPSoon(fresh.ID, fresh.Status.NodeName)
-	slog.Info("scheduler sandbox running", slog.String("sandbox", fresh.ID), slog.String("node", fresh.Status.NodeName))
+	slog.Info("scheduler sandbox scheduled", slog.String("sandbox", fresh.ID), slog.String("node", fresh.Status.NodeName))
 }
 
 func (s *Service) fetchSandboxIPOnce(ctx context.Context, nodeName, sandboxID string) string {

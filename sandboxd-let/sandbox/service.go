@@ -689,6 +689,12 @@ func (s *Service) waitReadinessProbe(ctx context.Context, sbx *model.Sandbox, pr
 	path := strings.TrimSpace(probe.Path)
 	period := time.Duration(probe.PeriodSeconds) * time.Second
 	timeout := time.Duration(probe.TimeoutSeconds) * time.Second
+	httpClient := &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	success := 0
 	failure := 0
 
@@ -699,7 +705,7 @@ func (s *Service) waitReadinessProbe(ctx context.Context, sbx *model.Sandbox, pr
 		default:
 		}
 
-		err := s.probeReadiness(addr, proto, path, timeout)
+		err := s.probeReadiness(ctx, httpClient, addr, proto, path, timeout)
 		if err != nil {
 			failure++
 			success = 0
@@ -722,7 +728,7 @@ func (s *Service) waitReadinessProbe(ctx context.Context, sbx *model.Sandbox, pr
 	}
 }
 
-func (s *Service) probeReadiness(addr, proto, path string, timeout time.Duration) error {
+func (s *Service) probeReadiness(ctx context.Context, httpClient *http.Client, addr, proto, path string, timeout time.Duration) error {
 	switch proto {
 	case "tcp":
 		conn, err := net.DialTimeout("tcp", addr, timeout)
@@ -734,8 +740,12 @@ func (s *Service) probeReadiness(addr, proto, path string, timeout time.Duration
 		return nil
 	case "http":
 		u := fmt.Sprintf("http://%s%s", addr, path)
-		client := &http.Client{Timeout: timeout}
-		resp, err := client.Get(u)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return err
+		}
+
+		resp, err := httpClient.Do(req)
 		if err != nil {
 			return err
 		}

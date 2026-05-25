@@ -474,7 +474,7 @@ paths:
       tags:
       - orchestrator-node
     get:
-      description: Returns a single node by name.
+      description: Returns a single node by id.
       parameters:
       - description: Node id
         in: path

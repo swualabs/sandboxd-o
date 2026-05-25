@@ -174,7 +174,7 @@ func (h *Handler) ListNodes(c *gin.Context) {
 
 // GetNode godoc
 // @Summary Get node
-// @Description Returns a single node by name.
+// @Description Returns a single node by id.
 // @Tags orchestrator-node
 // @Produce json
 // @Param id path string true "Node id"
