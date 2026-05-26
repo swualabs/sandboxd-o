@@ -38,7 +38,6 @@ func newPerfStageTimer() *perfStageTimer {
 }
 
 func (t *perfStageTimer) mark(stage string, started time.Time) {
-	// PERF measurement disabled.
 	// if t == nil {
 	// 	return
 	// }
@@ -46,7 +45,6 @@ func (t *perfStageTimer) mark(stage string, started time.Time) {
 }
 
 func (t *perfStageTimer) total() time.Duration {
-	// PERF measurement disabled.
 	// if t == nil {
 	// 	return 0
 	// }
@@ -260,10 +258,8 @@ func (s *Service) provisionSandbox(sandboxID string, req model.CreateSandboxRequ
 
 func (s *Service) provisionSandboxSync(ctx context.Context, sbx *model.Sandbox, req model.CreateSandboxRequest) (*model.Sandbox, error) {
 	ctx = namespaces.WithNamespace(ctx, s.namespace)
-	// PERF measurement disabled.
 	// perf := newPerfStageTimer()
 	created := false
-	// PERF measurement disabled.
 	// defer func() {
 	// 	attrs := []any{
 	// 		slog.String("sandbox", sbx.ID),
@@ -271,11 +267,11 @@ func (s *Service) provisionSandboxSync(ctx context.Context, sbx *model.Sandbox, 
 	// 		slog.Bool("created", created),
 	// 		slog.Duration("total", perf.total()),
 	// 	}
-	//
+
 	// 	for k, v := range perf.stages {
 	// 		attrs = append(attrs, slog.Duration(k, v))
 	// 	}
-	//
+
 	// 	slog.Info("perf.provision_sandbox", attrs...)
 	// }()
 
@@ -377,10 +373,12 @@ func (s *Service) provisionSandboxSync(ctx context.Context, sbx *model.Sandbox, 
 
 	s.dbg("hostport publish applied sandbox=%s", sbx.ID)
 	if req.Readiness != nil {
+		// stageStart = time.Now()
 		if err := s.waitReadinessProbe(readyCtx, sbx, req.Readiness); err != nil {
 			sbx.Error = err.Error()
 			return nil, err
 		}
+		// perf.mark("wait_readiness_probe", stageStart)
 	}
 
 	// stageStart = time.Now()

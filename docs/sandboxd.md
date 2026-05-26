@@ -112,6 +112,8 @@ Base URL: `http://localhost:8080`
 - If provided, all fields inside `readinessProbe` are required.
 - `protocol` supports `tcp` and `http`.
 - If `protocol` is `http`, `path` is required and must start with `/`.
+- `http` readiness is considered successful only for status codes in the range `200 <= code < 400`.
+- Readiness checks target the sandbox private endpoint (`sandboxIP:port`) and do not directly validate external reachability on published host ports.
 
 **Response (Accepted)**
 
