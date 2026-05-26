@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -37,7 +38,6 @@ func newPerfStageTimer() *perfStageTimer {
 }
 
 func (t *perfStageTimer) mark(stage string, started time.Time) {
-	// PERF measurement disabled.
 	// if t == nil {
 	// 	return
 	// }
@@ -45,7 +45,6 @@ func (t *perfStageTimer) mark(stage string, started time.Time) {
 }
 
 func (t *perfStageTimer) total() time.Duration {
-	// PERF measurement disabled.
 	// if t == nil {
 	// 	return 0
 	// }
@@ -259,10 +258,8 @@ func (s *Service) provisionSandbox(sandboxID string, req model.CreateSandboxRequ
 
 func (s *Service) provisionSandboxSync(ctx context.Context, sbx *model.Sandbox, req model.CreateSandboxRequest) (*model.Sandbox, error) {
 	ctx = namespaces.WithNamespace(ctx, s.namespace)
-	// PERF measurement disabled.
 	// perf := newPerfStageTimer()
 	created := false
-	// PERF measurement disabled.
 	// defer func() {
 	// 	attrs := []any{
 	// 		slog.String("sandbox", sbx.ID),
@@ -270,11 +267,11 @@ func (s *Service) provisionSandboxSync(ctx context.Context, sbx *model.Sandbox, 
 	// 		slog.Bool("created", created),
 	// 		slog.Duration("total", perf.total()),
 	// 	}
-	//
+
 	// 	for k, v := range perf.stages {
 	// 		attrs = append(attrs, slog.Duration(k, v))
 	// 	}
-	//
+
 	// 	slog.Info("perf.provision_sandbox", attrs...)
 	// }()
 
@@ -375,11 +372,14 @@ func (s *Service) provisionSandboxSync(ctx context.Context, sbx *model.Sandbox, 
 	// perf.mark("hostport_publish_apply", stageStart)
 
 	s.dbg("hostport publish applied sandbox=%s", sbx.ID)
-	// Published TCP readiness is best-effort; runtime task readiness is the
-	// primary success signal. Some images open ports slightly after task start.
-	// stageStart = time.Now()
-	_ = s.waitPublishedTCPReady(sbx)
-	// perf.mark("wait_published_tcp_ready", stageStart)
+	if req.Readiness != nil {
+		// stageStart = time.Now()
+		if err := s.waitReadinessProbe(readyCtx, sbx, req.Readiness); err != nil {
+			sbx.Error = err.Error()
+			return nil, err
+		}
+		// perf.mark("wait_readiness_probe", stageStart)
+	}
 
 	// stageStart = time.Now()
 	s.refreshSandboxRuntimeState(ctx, sbx)
@@ -670,39 +670,93 @@ func normalizeProto(proto string) string {
 	return p
 }
 
-func (s *Service) waitPublishedTCPReady(sbx *model.Sandbox) error {
-	deadline := time.Now().Add(10 * time.Second)
-	consecutive := 0
-	for time.Now().Before(deadline) {
-		allReady := true
-		for _, p := range sbx.Ports {
-			if normalizeProto(p.Protocol) != "tcp" {
-				continue
-			}
-
-			addr := net.JoinHostPort(sbx.IP, fmt.Sprintf("%d", p.ContainerPort))
-			conn, err := net.DialTimeout("tcp", addr, 800*time.Millisecond)
-			if err != nil {
-				allReady = false
-				break
-			}
-
-			_ = conn.Close()
-		}
-
-		if allReady {
-			consecutive++
-			if consecutive >= 4 {
-				return nil
-			}
-		} else {
-			consecutive = 0
-		}
-
-		time.Sleep(150 * time.Millisecond)
+func (s *Service) waitReadinessProbe(ctx context.Context, sbx *model.Sandbox, probe *model.ReadinessProbeSpec) error {
+	if probe == nil {
+		return nil
 	}
 
-	return fmt.Errorf("sandbox %s tcp ports not ready before timeout", sbx.ID)
+	delay := time.Duration(probe.InitialDelaySeconds) * time.Second
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("sandbox %s readiness probe canceled before start: %w", sbx.ID, ctx.Err())
+	case <-time.After(delay):
+	}
+
+	addr := net.JoinHostPort(sbx.IP, fmt.Sprintf("%d", probe.Port))
+	proto := strings.ToLower(strings.TrimSpace(probe.Protocol))
+	path := strings.TrimSpace(probe.Path)
+	period := time.Duration(probe.PeriodSeconds) * time.Second
+	timeout := time.Duration(probe.TimeoutSeconds) * time.Second
+	httpClient := &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	success := 0
+	failure := 0
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("sandbox %s readiness probe canceled: %w", sbx.ID, ctx.Err())
+		default:
+		}
+
+		err := s.probeReadiness(ctx, httpClient, addr, proto, path, timeout)
+		if err != nil {
+			failure++
+			success = 0
+			if failure >= probe.FailureThreshold {
+				return fmt.Errorf("sandbox %s readiness probe failed: protocol=%s target=%s path=%s failed %d times (timeout=%s): %w", sbx.ID, proto, addr, path, failure, timeout, err)
+			}
+		} else {
+			success++
+			failure = 0
+			if success >= probe.SuccessThreshold {
+				return nil
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("sandbox %s readiness probe canceled: %w", sbx.ID, ctx.Err())
+		case <-time.After(period):
+		}
+	}
+}
+
+func (s *Service) probeReadiness(ctx context.Context, httpClient *http.Client, addr, proto, path string, timeout time.Duration) error {
+	switch proto {
+	case "tcp":
+		conn, err := net.DialTimeout("tcp", addr, timeout)
+		if err != nil {
+			return err
+		}
+
+		_ = conn.Close()
+		return nil
+	case "http":
+		u := fmt.Sprintf("http://%s%s", addr, path)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return err
+		}
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return err
+		}
+
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+			return fmt.Errorf("unexpected status code %d", resp.StatusCode)
+		}
+
+		return nil
+	default:
+		return fmt.Errorf("unsupported readiness protocol %q", proto)
+	}
 }
 
 func (s *Service) hasRuntimeArtifacts(sandboxID string) bool {

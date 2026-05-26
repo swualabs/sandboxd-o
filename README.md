@@ -35,6 +35,7 @@
     - [Sandbox](#sandbox)
         - [egress, ttl_seconds, ports](#egress-ttl_seconds-ports)
         - [containers](#containers)
+        - [Readiness Probe](#readiness-probe)
 - [Sandbox/Container State](#sandboxcontainer-state)
 - [Installation, Build and Usage](#installation-build-and-usage)
     - [Requirements](#requirements)
@@ -43,10 +44,12 @@
 - [Environment Variables](#environment-variables)
 - [Testing](#testing)
 - [Appendix A. Performance and Benchmarking](#appendix-a-performance-and-benchmarking)
-    - [Client Observed](#client-observed)
-    - [Sbxlet Internal](#sbxlet-internal)
+    - [Client Baseline](#client-baseline)
+    - [Sbxlet Internal Baseline](#sbxlet-internal-baseline)
+    - [Sbxlet Stage (Containerd CRI)](#sbxlet-stage-containerd-cri)
+    - [Compare Low vs High Resource Configurations](#compare-low-vs-high-resource-configurations)
+    - [Sweep](#sweep)
     - [Discussion](#discussion)
-    - [Performance Measurements with Relaxed CPU/Memory Limits](#performance-measurements-with-relaxed-cpumemory-limits)
 - [Appendix B. Infrastructure Cost Comparison (vs K8s)](#appendix-b-infrastructure-cost-comparison-vs-k8s)
 - [Appendix C. Reference](#appendix-c-reference)
 - [Appendix D. API Documentation](#appendix-d-api-documentation)
@@ -453,6 +456,93 @@ The following is an example container specification capable of running a sample 
 >
 > As a result, it could not be controlled at the code level in the current implementation. Further investigation and experimentation will be conducted in the future to determine whether limits can be enforced for this mount point as well.
 
+### Readiness Probe
+
+Sandboxd-O supports a **Readiness Probe** feature for sandboxes.
+
+A Readiness Probe is a mechanism used to determine whether a sandbox is ready. Until the sandbox is considered ready, external access is not allowed.
+
+The following example demonstrates its usage, and it behaves similarly to Kubernetes' Readiness Probe model.
+
+```yaml
+apiVersion: sandboxd.o/v1
+kind: Sandbox
+id: sbx-nginx
+spec:
+    egress: true
+    ttl_seconds: 3600
+    ports:
+        - container_port: 80
+          protocol: tcp
+    readiness_probe:
+        protocol: http
+        path: /
+        port: 80
+        initial_delay_seconds: 10
+        period_seconds: 5
+        timeout_seconds: 1
+        success_threshold: 1
+        failure_threshold: 5
+    containers:
+        - name: app
+          image: nginx:latest
+          args: []
+          env: []
+          work_dir: ''
+          resource:
+              cpu: 150m
+              memory: 64Mi
+              ephemeral_storage: 96Mi
+```
+
+- `readiness_probe`: A field used to configure the Readiness Probe. It determines whether the sandbox is considered ready. This field itself is optional, but the fields below become required once it is specified.
+
+- `protocol`: Specifies the protocol used by the Readiness Probe. Supported values are `http` and `tcp`.
+    - For the HTTP protocol, an internal HTTP GET request is performed, and the sandbox is considered ready when the response satisfies `200 <= status < 400`.
+    - For the TCP protocol, an internal TCP connection attempt (`Dial`) is performed, and the sandbox is considered ready when the connection succeeds.
+    - UDP is not supported due to its protocol characteristics.
+
+- `path`: Specifies the path used by the Readiness Probe when `http` is selected. For example, setting `/healthz` sends an HTTP GET request to that endpoint inside the sandbox.
+
+- `port`: Specifies the port that the Readiness Probe will target. This must match one of the `container_port` values defined in the `ports` field.
+
+The following additional options control Readiness Probe behavior:
+
+- `initial_delay_seconds`: Specifies the delay (in seconds) after sandbox creation before the first Readiness Probe execution. During this period, the sandbox is considered not ready.
+
+- `period_seconds`: Specifies the interval (in seconds) between repeated Readiness Probe executions.
+
+- `timeout_seconds`: Specifies the timeout (in seconds) for each probe request. If no response is received or the connection attempt fails within this duration, the attempt is treated as failed.
+
+- `success_threshold`: Specifies the number of consecutive successful probe attempts required for the sandbox to be considered ready. For example, setting this to `1` marks the sandbox as ready after the first successful attempt.
+
+- `failure_threshold`: Specifies the number of consecutive failed probe attempts required before the sandbox is considered not ready. For example, setting this to `5` marks the sandbox as not ready after five consecutive failures.
+
+When a Readiness Probe is configured, the sandbox state immediately after provisioning starts as:
+
+- `Creating` in **sbxlet**
+- `Scheduled` in **sbxorch**
+
+Once the probe succeeds and the sandbox is determined to be ready:
+
+- sbxlet transitions the sandbox to `Running`
+- sbxorch also transitions the sandbox to `Running`
+
+If the probe fails and the sandbox is determined to be not ready:
+
+- sbxlet transitions the sandbox to `Error`
+- sbxorch transitions the sandbox to `Failed`
+
+This means the Readiness Probe directly affects sandbox state transitions and allows access to remain blocked until the sandbox is actually ready.
+
+If no Readiness Probe is configured, the sandbox transitions to `Running` immediately after provisioning. In such cases, even though the sandbox appears as `Running`, the application inside may not yet be fully initialized.
+
+Therefore, using a Readiness Probe is recommended to more accurately reflect real application readiness.
+
+> [!NOTE]
+>
+> This feature was introduced starting from **v0.3.0**. For more details, refer to PR #15.
+
 ## Sandbox/Container State
 
 In sbxlet, sandboxes and containers have the following states, and each state is mapped to the corresponding sbxorch sandbox state.
@@ -478,11 +568,9 @@ Likewise, when a sandbox is deleted through sbxorch, its state transitions to `D
 
 > [!NOTE]
 >
-> Even when a sandbox is in the `Running` state, it may not actually be fully ready due to initialization tasks such as image preparation, network configuration, or application startup inside the container.
+> 만약 컨테이너별 의존성이 필요할 경우, `wordpress.yaml`의 예제와 같이 컨테이너의 `args` 필드에 커스텀 스크립트를 작성하여 의존성 체크 및 대기 로직을 구현하는 방식을 권장합니다. 예를 들어, WordPress 컨테이너가 MySQL 컨테이너에 의존성이 있는 경우, WordPress 컨테이너의 `args`에 MySQL이 준비될 때까지 대기하는 스크립트를 작성할 수 있습니다.
 >
-> Therefore, a sandbox reaching the `Running` state should not be assumed to mean that it is immediately usable. When necessary, it is recommended to implement an external readiness mechanism, similar to a Readiness Probe, to verify that the sandbox is actually ready.
->
-> However, this project does not provide a built-in Readiness Probe mechanism. Instead, as demonstrated in the `wordpress.yaml` example above, the recommended approach is to implement waiting logic through custom scripts in the container's `args` field so that execution proceeds only after the application becomes fully ready.
+> 이는 위 Readiness Probe와는 다른 방식으로, Readiness Probe는 샌드박스의 상태를 `Running`으로 전환하기 위한 TCP Dial 또는 HTTP Get Health Check 등의 헬스 체크 메커니즘을 제공하지만, 컨테이너 간의 의존성이나 준비 상태를 직접적으로 관리하는 기능은 제공하지 않습니다.
 
 This information can be checked using commands such as `sbxctl get sandboxes` or `sbxctl get sandboxes/:ID`, or through the API.
 
@@ -713,7 +801,7 @@ However, since there are components that are difficult to test—such as sbxlet�
 
 # Appendix A. Performance and Benchmarking
 
-In this section, we summarize the performance measurement results for a sandbox creation workload on sbxlet using the following configuration containing a single nginx container.
+This section presents the benchmarking results of Sandboxd-O provisioning performance using the following specification containing a single Nginx container.
 
 ```yaml
 apiVersion: sandboxd.o/v1
@@ -724,174 +812,194 @@ spec:
     ports:
         - container_port: 80
           protocol: tcp
+    readiness_probe:
+        protocol: http
+        path: /
+        port: 80
+        initial_delay_seconds: 1
+        period_seconds: 1
+        timeout_seconds: 1
+        success_threshold: 1
+        failure_threshold: 99
     containers:
         - name: nginx
           image: nginx:latest
           resource:
-              cpu: 200m
-              memory: 256Mi
+              cpu: 500m
+              memory: 512Mi
               ephemeral_storage: 128Mi
 ```
 
 During the performance measurement process, the following probes were used as measurement targets. Data was collected by adding detailed timing logs for each stage inside `sbxlet`.
 
-- `pod_sandbox_create_total`: Total time required to create the PodSandbox (including namespace setup, base networking, and runtime initialization)
-- `container_create_start_total`: Total time for a single container covering `CreateContainer` + `StartContainer` + state verification
-- `container_image_pull`: Time spent checking image existence and attempting image pull (may be very small when cache hits occur)
+- `pod_sandbox_create_total`: Total time required for PodSandbox creation (including namespace setup, base networking, and runtime initialization)
+- `container_create_start_total`: Total time for a single container including `CreateContainer` + `StartContainer` + state verification
+- `container_image_pull`: Time spent checking image availability and attempting image pull (may be extremely small in the case of cache hits)
 - `network_policy_apply`: Time required to apply sandbox firewall/isolation rules (`iptables`)
 - `hostport_publish_apply`: Time required to apply Host Port DNAT rules
-- `wait_sandbox_ready`: Waiting time until the runtime determines that the container has reached the running state
-- `wait_published_tcp_ready`: Waiting time until the published TCP port becomes actually reachable
-- `state_refresh_and_save_running`: Time required to refresh the final runtime state and persist the `Running` status
+- `wait_sandbox_ready`: Waiting time until the runtime determines that the container has reached the `Running` state
+- `wait_readiness_probe`: Time spent waiting until the Readiness Probe succeeds and sbxlet proceeds to mark the sandbox as `Running`
+- `state_refresh_and_save_running`: Time required to refresh the final runtime state and persist the `Running` state
 
-Finally, `total` represents the complete elapsed time from the moment sbxlet enters the actual provisioning function until runtime state refresh completes and the `Running` state is persisted.
+Finally, `total` represents the overall elapsed time from the moment sbxlet enters the actual provisioning function until the runtime state is stored as `Running`.
 
-Additionally, `client_ready_ms` represents the elapsed time from immediately before the client sends `POST /api/v1/sandboxes` to sbxorch until the sandbox appears as `Running` when queried through sbxorch.
+Additionally, `client_ready_ms` represents the total elapsed time from immediately before sending the `POST /api/v1/sandboxes` request from the sbxorch perspective until repeated `GET /api/v1/sandboxes/{id}` polling observes the sandbox state as `Running` (or terminal failure state).
 
-This metric reflects the perceived provisioning time from the user/control-plane perspective.
+In other words, this metric represents the provisioning latency perceived from the user/control-plane perspective.
 
-The test was conducted by repeatedly creating and deleting the same sandbox specification **45 times**, and the collected data was analyzed using **p50**, **p95**, and **p99** tail latency metrics.
+The test was performed by repeating the same sandbox specification **45 times**, and the collected data was analyzed using **p50**, **p95**, and **p99** tail latency metrics.
 
-> [!NOTE]
->
-> Script used for measurement:
->
-> - `scripts/run_nginx_perf.sh`
-> - `scripts/run_resource_sweep_full.py`
+## Client Baseline
 
-## Client Observed
-
-| metric          |   n |  mean_ms |   p50_ms |   p95_ms |   p99_ms |   max_ms |
-| --------------- | --: | -------: | -------: | -------: | -------: | -------: |
-| client_ready_ms |  45 | 1519.489 | 1531.000 | 2141.000 | 2444.000 | 2925.000 |
-
-## Sbxlet Internal
-
-![sbxlet Internal](./assets/sbxlet_internal_percent_stacked.png)
-
-| metric                         |   n |  mean_ms |   p50_ms |   p95_ms |   p99_ms |   max_ms |
-| ------------------------------ | --: | -------: | -------: | -------: | -------: | -------: |
-| total                          |  45 | 6390.907 | 6297.743 | 7150.538 | 7286.332 | 7491.614 |
-| pod_sandbox_create_total       |  45 | 1077.673 | 1077.415 | 1325.760 | 1382.731 | 1457.871 |
-| container_image_pull           |  45 |    0.832 |    0.928 |    1.040 |    1.054 |    1.277 |
-| container_create_start_total   |  45 |  939.860 |  959.595 | 1250.632 | 1315.935 | 1343.643 |
-| network_policy_apply           |  45 |  186.506 |  197.714 |  243.802 |  245.806 |  266.276 |
-| wait_sandbox_ready             |  45 |    2.737 |    2.391 |    4.883 |    5.088 |    7.982 |
-| hostport_publish_apply         |  45 |   36.860 |   35.427 |   52.278 |   60.815 |   62.523 |
-| wait_published_tcp_ready       |  45 | 4112.959 | 4106.111 | 4815.551 | 4935.057 | 4950.302 |
-| state_refresh_and_save_running |  45 |    4.967 |    5.277 |    5.579 |    5.968 |    6.093 |
+| metric          |   n |      mean_ms |       p50_ms |       p95_ms |       p99_ms |       max_ms |
+| --------------- | --: | -----------: | -----------: | -----------: | -----------: | -----------: |
+| client_ready_ms |  45 | 18718.034532 | 18941.967529 | 19030.195312 | 19073.408203 | 19107.492676 |
 
 > [!NOTE]
 >
-> Although the total runtime-internal stages measured above—including `wait_published_tcp_ready`—were observed to take approximately **4–5 seconds**, the perceived provisioning time from the client perspective (`client_ready_ms`) was measured at only **2–2.5 seconds**.
+> The following sbxorch environment variable was used in this measurement environment:
 >
-> This occurs because sbxlet processes part of its runtime-internal stages asynchronously. As a result, there are moments where the sandbox already appears as `Running` to the client while, internally within sbxlet, the `wait_published_tcp_ready` stage—which verifies TCP port reachability—has not yet completed.
+> ```ini
+> ORCH_STATUS_SYNC_INTERVAL=20s
+> ```
 >
-> In practice, it was observed that there is roughly a **4–5 second gap** between the point where sbxorch reports the sandbox as `Running` and the point where the application's `wait_published_tcp_ready` stage completes and the published TCP port actually becomes reachable.
+> This means that sbxorch was configured to synchronize sandbox state from sbxlet every 20 seconds.
 >
-> This process only exists within sbxlet's runtime stages and is not currently used by sbxorch.
+> As a result, `client_ready_ms` is measured according to sbxorch's status synchronization interval (20 seconds), which explains why the observed values were approximately around 20 seconds.
 >
-> It is intended for future features such as Readiness Probe support, and therefore it is more appropriate to exclude `wait_published_tcp_ready` when measuring total sandbox provisioning time.
+> This metric is based on sbxorch's perspective. In practice, when the client sends a Status GET API request, the status is updated accordingly, so the actual perceived transition time to `Running` is expected to be shorter.
 >
-> As a result, the total duration of all stages excluding `wait_published_tcp_ready` can be considered the point at which the runtime effectively reaches the `Running` state inside sbxlet, which was measured to be approximately **2–2.5 seconds**.
+> In fact, testing confirmed that the sandbox transitioned to `Running` and became reachable in approximately **2 seconds** (matching sbxlet's total latency), before sbxorch updated the state through its synchronization loop.
 
----
+## Sbxlet Internal Baseline
 
-Additionally, we collected `perf.stage` logs that further break down the PodSandbox and Container (CRI) creation paths.
+![sbxlet internal baseline](./assets/sbxlet_internal_percent_stacked.png)
 
-These logs record timings at a more granular level by splitting PodSandbox creation and Container creation/startup into finer execution stages.
+| metric                         |   n |     mean_ms |      p50_ms |      p95_ms |      p99_ms |      max_ms |
+| ------------------------------ | --: | ----------: | ----------: | ----------: | ----------: | ----------: |
+| total                          |  45 | 2178.621589 | 2053.916593 | 2944.276319 | 3097.327348 | 3320.588127 |
+| pod_sandbox_create_total       |  45 |  344.272735 |  330.796320 |  472.243653 |  649.635123 |  711.289052 |
+| container_image_pull           |  45 |    0.555835 |    0.514975 |    0.973611 |    0.991320 |    1.023044 |
+| container_create_start_total   |  45 |  487.206278 |  497.574547 |  634.109749 |  716.261264 |  749.595281 |
+| network_policy_apply           |  45 |  150.309222 |  149.313072 |  197.676209 |  208.353703 |  226.132524 |
+| wait_sandbox_ready             |  45 |    1.664390 |    1.506291 |    2.342074 |    2.573512 |    5.834114 |
+| hostport_publish_apply         |  45 |   27.188316 |   23.946189 |   42.280091 |   48.185709 |   48.505696 |
+| wait_readiness_probe           |  45 | 1138.231510 | 1005.326693 | 2013.692176 | 2043.987995 | 2064.558837 |
+| state_refresh_and_save_running |  45 |    5.369700 |    5.502309 |    6.457015 |    6.796266 |    7.011295 |
 
-![sbxlet Stage Pod](./assets/sbxlet_stage_pod_percent_stacked.png)
+## Sbxlet Stage (Containerd CRI)
 
-| metric                          |   n |  mean_ms |   p50_ms |   p95_ms |   p99_ms |   max_ms |
-| ------------------------------- | --: | -------: | -------: | -------: | -------: | -------: |
-| stage_pod_aggregate_resources   |  45 |    0.017 |    0.016 |    0.022 |    0.053 |    0.058 |
-| stage_pod_ensure_parent_cgroup  |  45 |    1.001 |    1.010 |    1.195 |    1.349 |    2.446 |
-| stage_pod_run_pod_sandbox       |  45 | 1032.151 | 1011.824 | 1286.893 | 1328.708 | 1399.927 |
-| stage_pod_enforce_cgroup_limits |  45 |    0.717 |    0.849 |    0.901 |    0.937 |    1.001 |
-| stage_pod_status_query          |  45 |    0.907 |    0.984 |    1.095 |    1.881 |    2.000 |
-| stage_pod_create_total          |  45 | 1071.153 | 1073.222 | 1321.445 | 1378.830 | 1454.139 |
+![sbxlet stage container breakdown](./assets/sbxlet_stage_container_percent_stacked.png)
 
-![sbxlet Stage Container](./assets/sbxlet_stage_container_percent_stacked.png)
+| metric                                |   n |    mean_ms |     p50_ms |     p95_ms |     p99_ms |     max_ms |
+| ------------------------------------- | --: | ---------: | ---------: | ---------: | ---------: | ---------: |
+| stage_container_ensure_tmpfs_mount    |  45 |   5.244724 |   4.924421 |   8.973015 |   9.476388 |   9.643016 |
+| stage_container_create                |  45 |  69.486650 |  70.458002 |  89.674067 |  96.330383 |  96.715802 |
+| stage_container_start                 |  45 | 378.973056 | 392.003143 | 504.173811 | 609.396929 | 637.010683 |
+| stage_container_enforce_cgroup_limits |  45 |   0.961051 |   1.031276 |   1.463898 |   2.425223 |   2.492357 |
+| stage_container_status_query          |  45 |   2.935109 |   3.331555 |   4.397661 |   4.638227 |   4.982841 |
+| stage_container_create_start_total    |  45 | 482.228314 | 493.870857 | 630.107004 | 712.854420 | 745.647821 |
 
-| metric                                |   n | mean_ms |  p50_ms |   p95_ms |   p99_ms |   max_ms |
-| ------------------------------------- | --: | ------: | ------: | -------: | -------: | -------: |
-| stage_container_ensure_tmpfs_mount    |  45 |   7.459 |   7.909 |    9.545 |    9.965 |   10.195 |
-| stage_container_create                |  45 |  37.230 |  38.953 |   41.112 |   44.593 |   46.443 |
-| stage_container_start                 |  45 | 859.577 | 873.274 | 1176.329 | 1242.159 | 1247.740 |
-| stage_container_enforce_cgroup_limits |  45 |   0.843 |   0.905 |    0.943 |    0.973 |    1.482 |
-| stage_container_status_query          |  45 |   3.516 |   3.802 |    4.278 |    4.562 |    4.903 |
-| stage_container_create_start_total    |  45 | 935.134 | 956.013 | 1247.155 | 1312.172 | 1339.874 |
+![sbxlet stage pod breakdown](./assets/sbxlet_stage_pod_percent_stacked.png)
 
-In practice, it was confirmed that `pod_sandbox_create_total` and `container_create_start_total` in `perf.provision_sandbox` closely match the aggregate values of `stage_pod_create_total` and `stage_container_create_start_total`, respectively.
+| metric                          |   n |    mean_ms |     p50_ms |     p95_ms |     p99_ms |     max_ms |
+| ------------------------------- | --: | ---------: | ---------: | ---------: | ---------: | ---------: |
+| stage_pod_aggregate_resources   |  45 |   0.015076 |   0.014904 |   0.016146 |   0.016723 |   0.044544 |
+| stage_pod_ensure_parent_cgroup  |  45 |   0.982889 |   0.987719 |   1.117943 |   1.138562 |   1.717180 |
+| stage_pod_run_pod_sandbox       |  45 | 307.015569 | 289.886447 | 401.243166 | 599.556773 | 683.984414 |
+| stage_pod_enforce_cgroup_limits |  45 |   0.502330 |   0.441017 |   0.801416 |   0.924747 |   1.116165 |
+| stage_pod_status_query          |  45 |   0.505591 |   0.439205 |   0.857806 |   0.963953 |   1.038865 |
+| stage_pod_create_total          |  45 | 340.123423 | 326.675724 | 468.357043 | 645.852200 | 707.446993 |
 
-This demonstrates that the stage-level timing logs are accurately mapped to the higher-level aggregated metrics.
+## Compare Low vs High Resource Configurations
+
+The following graph compares the results from the baseline configuration (**200m / 256Mi**) with the higher-spec configuration (**3000m / 8Gi**).
+
+![low vs high resource comparison](./assets/default_vs_relaxed_horizontal_bars.png)
+
+## Sweep
+
+In this section, we present benchmarking results obtained by provisioning the same sandbox specification **five times each** across **seven different resource configurations**, ranging from **200m / 256Mi** up to **3000m / 8Gi**.
+
+The benchmark used the specification shown below. Since the original Nginx configuration provisioned too quickly for meaningful comparison, the following image was used instead.
+
+```yaml
+apiVersion: sandboxd.o/v1
+kind: Sandbox
+id: perf-sweep
+spec:
+    egress: false
+    ports:
+        - container_port: 80
+          protocol: tcp
+    readiness_probe:
+        protocol: http
+        path: /
+        port: 80
+        initial_delay_seconds: 1
+        period_seconds: 1
+        timeout_seconds: 1
+        success_threshold: 1
+        failure_threshold: 99
+    containers:
+        - name: web
+          image: httpd:2.4
+          resource:
+              cpu: ...
+              memory: ...
+              ephemeral_storage: 128Mi
+```
+
+![sweep](./assets/appendix_a_resource_sweep_internal.png)
+
+| cpu   | memory | runs | client_ready_ms_mean | client_ready_ms_p95 | total_ms_mean | total_ms_p95 | wait_readiness_probe_ms_mean | wait_readiness_probe_ms_p95 | pod_sandbox_create_total_ms_mean | pod_sandbox_create_total_ms_p95 | container_create_start_total_ms_mean | container_create_start_total_ms_p95 | network_policy_apply_ms_mean | network_policy_apply_ms_p95 | hostport_publish_apply_ms_mean | hostport_publish_apply_ms_p95 | wait_sandbox_ready_ms_mean | wait_sandbox_ready_ms_p95 | state_refresh_and_save_running_ms_mean | state_refresh_and_save_running_ms_p95 | container_image_pull_ms_mean | container_image_pull_ms_p95 |
+| ----- | ------ | ---- | -------------------- | ------------------- | ------------- | ------------ | ---------------------------- | --------------------------- | -------------------------------- | ------------------------------- | ------------------------------------ | ----------------------------------- | ---------------------------- | --------------------------- | ------------------------------ | ----------------------------- | -------------------------- | ------------------------- | -------------------------------------- | ------------------------------------- | ---------------------------- | --------------------------- |
+| 200m  | 256Mi  | 5    | 21201.933            | 18981.647           | 16416.674     | 15766.847    | 13027.553                    | 13169.428                   | 1000.999                         | 1188.498                        | 980.898                              | 1170.267                            | 200.309                      | 219.472                     | 31.527                         | 35.575                        | 2.772                      | 3.705                     | 3.830                                  | 5.445                                 | 0.670                        | 0.919                       |
+| 500m  | 512Mi  | 5    | 18933.306            | 19011.784           | 11707.671     | 11719.316    | 10680.224                    | 10663.161                   | 327.285                          | 384.406                         | 498.121                              | 537.331                             | 140.145                      | 169.921                     | 27.755                         | 24.883                        | 1.508                      | 1.761                     | 8.016                                  | 12.724                                | 0.605                        | 0.680                       |
+| 1000m | 1Gi    | 5    | 18959.392            | 18994.345           | 11351.656     | 11949.836    | 10420.365                    | 11039.037                   | 285.077                          | 287.233                         | 395.608                              | 429.625                             | 179.611                      | 183.337                     | 41.041                         | 45.896                        | 2.137                      | 1.979                     | 5.469                                  | 5.669                                 | 0.555                        | 0.635                       |
+| 1500m | 2Gi    | 5    | 18928.689            | 18906.061           | 10758.871     | 10799.677    | 9857.296                     | 9883.222                    | 284.922                          | 299.824                         | 366.950                              | 383.775                             | 183.918                      | 203.932                     | 36.787                         | 45.268                        | 2.731                      | 3.340                     | 1.771                                  | 1.865                                 | 0.554                        | 0.904                       |
+| 2000m | 4Gi    | 5    | 18928.480            | 18957.647           | 10759.727     | 10801.446    | 9903.016                     | 9938.695                    | 264.116                          | 272.214                         | 368.668                              | 393.849                             | 150.056                      | 171.543                     | 39.491                         | 47.820                        | 2.076                      | 2.458                     | 1.809                                  | 1.863                                 | 0.418                        | 0.448                       |
+| 2500m | 6Gi    | 5    | 18913.278            | 18960.410           | 10768.598     | 10769.095    | 9961.016                     | 9994.026                    | 283.675                          | 282.587                         | 343.380                              | 352.567                             | 119.984                      | 150.648                     | 32.075                         | 40.505                        | 1.812                      | 1.719                     | 1.813                                  | 1.822                                 | 0.556                        | 0.564                       |
+| 3000m | 8Gi    | 5    | 18904.753            | 19060.329           | 10721.606     | 10748.990    | 9946.710                     | 9985.840                    | 269.232                          | 263.255                         | 308.798                              | 334.199                             | 122.453                      | 119.776                     | 38.340                         | 46.761                        | 1.890                      | 2.460                     | 1.979                                  | 2.074                                 | 0.314                        | 0.317                       |
+
+> [!NOTE]
+>
+> Likewise, `client_ready_ms` follows sbxorch's status synchronization interval, which is why it was measured at approximately **20 seconds**.
+>
+> As a result, this metric is not particularly meaningful for performance evaluation and should be treated only as a reference value. For actual provisioning performance analysis, it is more appropriate to use the `total_ms` metric.
+
+The following shows provisioning time metrics for resource configurations ranging from the initial **64m / 256Mi** up to **1500m / 2Gi**.
+
+![sweep2](./assets/appendix_a_resource_sweep_internal_sweep2.png)
+
+| cpu   | memory | runs | client_ready_ms_mean | client_ready_ms_p95 | total_ms_mean | total_ms_p95 | wait_readiness_probe_ms_mean | wait_readiness_probe_ms_p95 | pod_sandbox_create_total_ms_mean | pod_sandbox_create_total_ms_p95 | container_create_start_total_ms_mean | container_create_start_total_ms_p95 | network_policy_apply_ms_mean | network_policy_apply_ms_p95 | container_image_pull_ms_mean | container_image_pull_ms_p95 | hostport_publish_apply_ms_mean | hostport_publish_apply_ms_p95 | state_refresh_and_save_running_ms_mean | state_refresh_and_save_running_ms_p95 | wait_sandbox_ready_ms_mean | wait_sandbox_ready_ms_p95 |
+| ----- | ------ | ---- | -------------------- | ------------------- | ------------- | ------------ | ---------------------------- | --------------------------- | -------------------------------- | ------------------------------- | ------------------------------------ | ----------------------------------- | ---------------------------- | --------------------------- | ---------------------------- | --------------------------- | ------------------------------ | ----------------------------- | -------------------------------------- | ------------------------------------- | -------------------------- | ------------------------- |
+| 64m   | 256Mi  | 5    | 44552.815            | 50456.955           | 32251.761     | 33555.515    | 24321.115                    | 24790.973                   | 4645.292                         | 5087.526                        | 2978.005                             | 3206.482                            | 226.729                      | 235.598                     | 0.858                        | 0.953                       | 47.941                         | 46.779                        | 4.131                                  | 5.634                                 | 3.910                      | 4.573                     |
+| 128m  | 384Mi  | 5    | 38440.381            | 38677.380           | 19181.087     | 19677.163    | 15628.733                    | 16194.279                   | 1887.490                         | 2136.663                        | 1418.087                             | 1465.719                            | 188.833                      | 241.473                     | 0.774                        | 0.931                       | 28.767                         | 35.020                        | 5.093                                  | 5.345                                 | 2.158                      | 3.211                     |
+| 200m  | 512Mi  | 5    | 18698.062            | 18735.332           | 15235.219     | 15460.760    | 12828.257                    | 13073.202                   | 1060.795                         | 1081.291                        | 1077.892                             | 1167.639                            | 196.593                      | 234.618                     | 1.115                        | 1.116                       | 34.064                         | 43.208                        | 5.355                                  | 5.429                                 | 2.355                      | 2.448                     |
+| 300m  | 640Mi  | 5    | 18834.925            | 18865.565           | 13761.889     | 13932.861    | 12048.247                    | 12050.953                   | 629.772                          | 818.901                         | 826.332                              | 947.325                             | 204.232                      | 229.309                     | 0.744                        | 0.947                       | 26.943                         | 27.424                        | 5.393                                  | 5.610                                 | 1.673                      | 1.784                     |
+| 400m  | 768Mi  | 5    | 18856.024            | 18899.073           | 12260.881     | 12371.831    | 10861.231                    | 10986.690                   | 517.968                          | 617.594                         | 632.707                              | 665.078                             | 187.306                      | 195.846                     | 0.678                        | 0.715                       | 35.510                         | 46.106                        | 5.076                                  | 5.447                                 | 1.846                      | 2.404                     |
+| 600m  | 1Gi    | 5    | 18903.773            | 18965.015           | 12028.595     | 12152.140    | 10940.812                    | 11041.821                   | 325.810                          | 362.435                         | 575.783                              | 645.470                             | 132.273                      | 143.523                     | 0.608                        | 0.680                       | 27.903                         | 30.065                        | 5.520                                  | 5.552                                 | 1.858                      | 2.215                     |
+| 800m  | 1280Mi | 5    | 18818.910            | 18883.067           | 11565.526     | 11984.752    | 10601.326                    | 11042.828                   | 276.507                          | 291.984                         | 452.828                              | 534.219                             | 170.300                      | 187.307                     | 0.609                        | 0.726                       | 37.013                         | 45.128                        | 4.602                                  | 5.136                                 | 2.559                      | 3.002                     |
+| 1000m | 1536Mi | 5    | 18856.507            | 18864.181           | 11179.475     | 11081.915    | 10191.833                    | 9992.137                    | 342.176                          | 387.094                         | 375.443                              | 368.430                             | 193.452                      | 205.708                     | 0.615                        | 0.869                       | 41.179                         | 46.633                        | 5.447                                  | 6.665                                 | 2.721                      | 3.218                     |
+| 1250m | 1792Mi | 5    | 18885.384            | 18980.821           | 10913.947     | 10928.295    | 9935.708                     | 9964.596                    | 335.752                          | 348.697                         | 408.990                              | 426.969                             | 161.214                      | 180.381                     | 0.706                        | 0.922                       | 40.588                         | 48.257                        | 3.068                                  | 3.089                                 | 2.845                      | 2.600                     |
+| 1500m | 2Gi    | 5    | 18855.397            | 18893.716           | 10816.679     | 10862.563    | 9899.840                     | 9934.223                    | 303.800                          | 320.247                         | 387.655                              | 399.730                             | 160.988                      | 185.320                     | 0.572                        | 0.624                       | 38.036                         | 48.348                        | 1.831                                  | 1.998                                 | 2.407                      | 2.993                     |
 
 ## Discussion
 
-Ultimately, for the sandbox creation workload containing a single nginx container, the perceived provisioning time from the client perspective (`client_ready_ms`) was measured to be approximately **1.5–2.5 seconds**.
+- Using the baseline resource configuration (**500m / 512Mi**) and an Nginx container, sandbox provisioning was observed to complete in approximately **2 seconds**. This represents the total provisioning latency, including container runtime initialization, network configuration, and readiness probe waiting time.
 
-Additionally, inside sbxlet, part of the runtime stages appear to be processed asynchronously. As a result, there are points where the client observes the sandbox as `Running`, while internally the runtime has already transitioned to `Running` but verification of external TCP port availability is still in progress.
+- In the **Sbxlet Internal Baseline** measurements, the stage with the highest latency was `wait_readiness_probe`, which represents the waiting period until the readiness probe succeeds. This is directly related to the time required for the container to become actually ready and may vary depending on readiness probe configuration and runtime specifications.
 
-In practice, it was observed that there is approximately a **4–5 second gap** between the moment sbxorch reports the sandbox as `Running` and the completion of the `wait_published_tcp_ready` stage, at which point the published TCP port actually becomes reachable.
+- In the **Resource Sweep** measurements, a downward trend was observed as resource specifications increased. Under the current specification and environment, the most significant improvement occurred in the transition from **200m / 256Mi** to **500m / 512Mi**, while provisioning time did not decrease significantly beyond the **1500m / 2Gi** range.
 
-The stage that consumes the most time in the overall provisioning process is `wait_published_tcp_ready`, which waits until the published TCP port becomes externally reachable.
-
-Although this stage is processed asynchronously inside the runtime, there are moments where it remains incomplete even after the client observes the sandbox as `Running`. As a result, a noticeable gap exists between the perceived provisioning time and the total duration of the runtime-internal stages.
-
-| metric                   |   n |  mean_ms |   p50_ms |   p95_ms |   p99_ms |   max_ms |
-| ------------------------ | --: | -------: | -------: | -------: | -------: | -------: |
-| wait_published_tcp_ready |  45 | 4112.959 | 4106.111 | 4815.551 | 4935.057 | 4950.302 |
-
-Additionally, this test was conducted under a **Warm Image Cache** condition, and in practice the `container_image_pull` stage was measured to take only a negligible amount of time (approximately **0.8 ms**) due to cache hits.
-
-If the image is not cached and must be pulled from a registry, this stage may increase significantly depending on the image size, potentially ranging from **tens of seconds to several minutes**.
-
-| metric               |   n | mean_ms | p50_ms | p95_ms | p99_ms | max_ms |
-| -------------------- | --: | ------: | -----: | -----: | -----: | -----: |
-| container_image_pull |  45 |   0.832 |  0.928 |  1.040 |  1.054 |  1.277 |
-
-Excluding that, the stages that consume the most time are `pod_sandbox_create_total` and `container_create_start_total`, which represent the total time spent in the PodSandbox creation path and the Container creation/startup path, respectively.
-
-| metric                       |   n |  mean_ms |   p50_ms |   p95_ms |   p99_ms |   max_ms |
-| ---------------------------- | --: | -------: | -------: | -------: | -------: | -------: |
-| pod_sandbox_create_total     |  45 | 1077.673 | 1077.415 | 1325.760 | 1382.731 | 1457.871 |
-| container_create_start_total |  45 |  939.860 |  959.595 | 1250.632 | 1315.935 | 1343.643 |
-
-## Performance Measurements with Relaxed CPU/Memory Limits
-
-The slowest stage, `wait_published_tcp_ready`, is directly related to constrained CPU and memory resources.
-
-This is because the application running inside the container (nginx in this example) starts under restricted resources, and that startup process directly affects the point at which the TCP port actually becomes reachable.
-
-The following results were measured using the same workload but with increased resource limits of **3500m CPU** and **8Gi memory**.
-
-![Default vs Relaxed](./assets/default_vs_relaxed_horizontal_bars.png)
-
-| metric                       | Default (200m / 256Mi) | Relaxed (3500m / 8Gi) | Difference (Relaxed − Default) |
-| ---------------------------- | ---------------------: | --------------------: | -----------------------------: |
-| total                        |               5927.704 |              1194.348 |                      -4733.356 |
-| pod_sandbox_create_total     |               1145.843 |               306.458 |                       -839.385 |
-| container_create_start_total |                811.175 |               280.107 |                       -531.068 |
-| network_policy_apply         |                114.914 |                85.990 |                        -28.924 |
-| hostport_publish_apply       |                 19.961 |                19.285 |                         -0.676 |
-| wait_published_tcp_ready     |               3783.487 |               456.029 |                      -3327.458 |
+- Additionally, using the httpd container benchmark, the largest reduction in provisioning time was observed when moving from **128m / 384Mi** to **200m / 512Mi**. Beyond approximately **400m / 768Mi**, provisioning time no longer decreased substantially. This suggests that there may be a minimum resource threshold required for the runtime to prepare containers efficiently.
 
 > [!WARNING]
 >
-> The results above and below were collected from a single test run and should not be generalized based on this data alone. In practice, it is necessary to perform **20–30 or more repeated measurements** to evaluate averages and distributions properly.
-
-Additionally, the results below summarize and visualize measurements taken while progressively relaxing CPU/memory limits from **50m / 64Mi** up to **Stage 7 (3500m / 8Gi)**.
-
-These values represent the total internal execution time inside sbxlet, including the `wait_published_tcp_ready` stage. _(Unit: ms)_
-
-![appendix_a_resource_sweep_internal.png](./assets/appendix_a_resource_sweep_internal.png)
-
-Although this depends on the resource requirements of the container image being used, for a basic nginx application the results show a downward trend similar to the graph above.
-
-Of course, the actual user-perceived latency represented by `client_ready_ms` may still appear relatively fast across all cases because `wait_published_tcp_ready` is processed asynchronously, and there are moments where the sandbox is already reported as `Running` even though that stage has not yet completed.
-
-Additionally, `wait_published_tcp_ready` may introduce extra delay due to its internal retry mechanism, so the measurements above should not be considered perfectly precise.
+> The results above assume a **Warm Cache** state for container images. Under **Cold Cache** conditions, significantly higher latency may occur during the image pull stage.
+>
+> In addition, actual provisioning time may vary depending on runtime behavior, networking configuration, and readiness probe settings. Therefore, these results should be treated only as reference measurements for the specific environment and specifications tested.
 
 # Appendix B. Infrastructure Cost Comparison (vs K8s)
 
@@ -905,8 +1013,8 @@ For this reason, Sandboxd-O was developed and adopted as a replacement for `cont
 
 More details can be found in the repositories below:
 
-* [smctf](https://github.com/nullforu/smctf?utm_source=chatgpt.com)
-* [smctf-infra-v2](https://github.com/nullforu/smctf-infra-v2?utm_source=chatgpt.com) (and the previous [smctf-infra based on container-provisioner-k8s](https://github.com/nullforu/smctf-infra?utm_source=chatgpt.com))
+- [smctf](https://github.com/nullforu/smctf?utm_source=chatgpt.com)
+- [smctf-infra-v2](https://github.com/nullforu/smctf-infra-v2?utm_source=chatgpt.com) (and the previous [smctf-infra based on container-provisioner-k8s](https://github.com/nullforu/smctf-infra?utm_source=chatgpt.com))
 
 The example below demonstrates how infrastructure costs changed after the migration (that is, comparing `smctf-infra` and `smctf-infra-v2`).
 
@@ -914,58 +1022,57 @@ The example below demonstrates how infrastructure costs changed after the migrat
 >
 > The example assumes:
 >
-> * MAU: **10,000 users**
-> * AWS region: **Seoul (`ap-northeast-2`)**
-> * Costs are approximate and may not be exact.
+> - MAU: **10,000 users**
+> - AWS region: **Seoul (`ap-northeast-2`)**
+> - Costs are approximate and may not be exact.
 >
 > Shared infrastructure costs excluded from both environments:
 >
-> * RDS
-> * ElastiCache
-> * S3
-> * ECR
-> * CloudWatch
-> * Data transfer / Internet egress charges
+> - RDS
+> - ElastiCache
+> - S3
+> - ECR
+> - CloudWatch
+> - Data transfer / Internet egress charges
 
 The following hourly prices are rough estimates for comparison purposes and may differ depending on discounts (SP, RI, EDP), taxes, and actual usage.
 
-* EKS control plane: `$0.10 / hour`
-* NAT Gateway hourly: `$0.045 / hour`
-* ALB hourly (base): `$0.0225 / hour`
-* ALB LCU: `$0.008 / LCU-hour` (example assumption)
-* EC2 `t3a.medium` (`ap-northeast-2`): `$0.0468 / hour`
-* Fargate (Linux/x86): since exact Seoul pricing should be taken from the console or calculator, this report uses **conservative estimates**
-
-  * `vCPU-hour ~= $0.050`
-  * `GB-hour ~= $0.0055`
+- EKS control plane: `$0.10 / hour`
+- NAT Gateway hourly: `$0.045 / hour`
+- ALB hourly (base): `$0.0225 / hour`
+- ALB LCU: `$0.008 / LCU-hour` (example assumption)
+- EC2 `t3a.medium` (`ap-northeast-2`): `$0.0468 / hour`
+- Fargate (Linux/x86): since exact Seoul pricing should be taken from the console or calculator, this report uses **conservative estimates**
+    - `vCPU-hour ~= $0.050`
+    - `GB-hour ~= $0.0055`
 
 Traffic and capacity assumptions:
 
-* Low average load with peak increases during certain periods
-* Average backend demand equivalent to **1–2 running tasks**
-* Peaks reaching **3–4 running tasks**
+- Low average load with peak increases during certain periods
+- Average backend demand equivalent to **1–2 running tasks**
+- Peaks reaching **3–4 running tasks**
 
 **v1 (K8s / EKS)**
 
-* Backend nodes: `t3a.medium ×2` (always running)
-* Stack nodes: `t3a.medium ×2` (minimum reserved headroom)
-* Total: **4 EC2 instances + EKS control plane**
+- Backend nodes: `t3a.medium ×2` (always running)
+- Stack nodes: `t3a.medium ×2` (minimum reserved headroom)
+- Total: **4 EC2 instances + EKS control plane**
 
 **v2 (Sandboxd-O)**
 
-* Sandbox workers: `t3a.medium ×2` (always running)
-* Sandbox control plane: `t3a.medium ×1` (always running)
-* Backend: Fargate tasks (`1 vCPU / 2GB`) with autoscaling
+- Sandbox workers: `t3a.medium ×2` (always running)
+- Sandbox control plane: `t3a.medium ×1` (always running)
+- Backend: Fargate tasks (`1 vCPU / 2GB`) with autoscaling
 
 Cost calculation formulas:
 
-* Monthly Cost:
+- Monthly Cost:
 
 $$
 \text{Monthly Cost} = \text{Hourly Cost} \times 730
 $$
 
-* Task Hourly Cost:
+- Task Hourly Cost:
 
 $$
 Task\ Hourly\ Cost = (vCPU \times vCPUPrice) + (MemoryGB \times GBPrice)
@@ -985,25 +1092,25 @@ Based on these assumptions:
 
 **v1 (K8s / EKS)**
 
-* EC2 (4 instances):
+- EC2 (4 instances):
 
 $$
 4 \times 0.0468 \times 730 = 136.66
 $$
 
-* EKS control plane:
+- EKS control plane:
 
 $$
 0.10 \times 730 = 73.00
 $$
 
-* ALB (hourly + 1 LCU):
+- ALB (hourly + 1 LCU):
 
 $$
 (0.0225 + 0.008) \times 730 = 22.27
 $$
 
-* NAT Gateway (hourly):
+- NAT Gateway (hourly):
 
 $$
 0.045 \times 730 = 32.85
@@ -1013,25 +1120,25 @@ $$
 
 **v2 (Sandboxd-O)**
 
-* EC2 (3 instances):
+- EC2 (3 instances):
 
 $$
 3 \times 0.0468 \times 730 = 102.50
 $$
 
-* Fargate backend (average 1.2 tasks):
+- Fargate backend (average 1.2 tasks):
 
 $$
 0.061 \times 730 \times 1.2 = 53.44
 $$
 
-* ALB (hourly + 1 LCU):
+- ALB (hourly + 1 LCU):
 
 $$
 22.27
 $$
 
-* NAT Gateway (hourly):
+- NAT Gateway (hourly):
 
 $$
 32.85

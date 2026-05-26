@@ -3,17 +3,31 @@ definitions:
   httpserver.ContainerLogsResponse:
     properties:
       container:
-        type: string      logs:
+        type: string
+      logs:
         $ref: '#/definitions/sandbox.LogsPage'
       sandbox_id:
         type: string
     type: object
+  httpserver.ContainerSyncStatus:
+    properties:
+      error:
+        type: string
+      name:
+        type: string
+      phase:
+        type: string
+      task_status:
+        type: string
+    type: object
   httpserver.CreateSandboxResponse:
-    properties:      sandbox:
+    properties:
+      sandbox:
         $ref: '#/definitions/model.Sandbox'
     type: object
   httpserver.DeleteSandboxResponse:
-    properties:      id:
+    properties:
+      id:
         type: string
       phase:
         type: string
@@ -24,7 +38,8 @@ definitions:
         type: string
     type: object
   httpserver.GetSandboxResponse:
-    properties:      sandbox:
+    properties:
+      sandbox:
         $ref: '#/definitions/model.Sandbox'
     type: object
   httpserver.HealthResponse:
@@ -33,7 +48,8 @@ definitions:
         type: boolean
     type: object
   httpserver.ListSandboxesResponse:
-    properties:      items:
+    properties:
+      items:
         items:
           $ref: '#/definitions/model.Sandbox'
         type: array
@@ -48,8 +64,42 @@ definitions:
         $ref: '#/definitions/model.NodeResourceSnapshot'
     type: object
   httpserver.ReconcileResponse:
-    properties:      ok:
+    properties:
+      ok:
         type: boolean
+    type: object
+  httpserver.SandboxStatusesRequest:
+    properties:
+      ids:
+        items:
+          type: string
+        type: array
+    type: object
+  httpserver.SandboxStatusesResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/httpserver.SandboxSyncStatus'
+        type: array
+      missing:
+        items:
+          type: string
+        type: array
+    type: object
+  httpserver.SandboxSyncStatus:
+    properties:
+      error:
+        type: string
+      id:
+        type: string
+      ip:
+        type: string
+      phase:
+        type: string
+      unhealthy_containers:
+        items:
+          $ref: '#/definitions/httpserver.ContainerSyncStatus'
+        type: array
     type: object
   model.ContainerState:
     properties:
@@ -113,6 +163,8 @@ definitions:
         items:
           $ref: '#/definitions/model.PortMapping'
         type: array
+      readinessProbe:
+        $ref: '#/definitions/model.ReadinessProbeSpec'
     type: object
   model.NodeResourceSnapshot:
     properties:
@@ -146,9 +198,30 @@ definitions:
       protocol:
         type: string
     type: object
+  model.ReadinessProbeSpec:
+    properties:
+      failureThreshold:
+        type: integer
+      initialDelaySeconds:
+        type: integer
+      path:
+        type: string
+      periodSeconds:
+        type: integer
+      port:
+        type: integer
+      protocol:
+        type: string
+      successThreshold:
+        type: integer
+      timeoutSeconds:
+        type: integer
+    type: object
   model.ResourceSpec:
     properties:
       cpu:
+        type: string
+      ephemeralStorage:
         type: string
       memory:
         type: string
@@ -201,9 +274,7 @@ definitions:
     type: object
 info:
   contact: {}
-  description: Sandbox node agent API for gVisor-based sandbox lifecycle, runtime
-    status, logs, and reconcile operations.
-  title: Sandboxd API
+  title: Sandboxd(Node Agent) API Server
   version: "1.0"
 paths:
   /healthz:
@@ -400,6 +471,37 @@ paths:
       summary: Get container logs
       tags:
       - sandboxd-logs
+  /v1/sandboxes/statuses:
+    post:
+      consumes:
+      - application/json
+      description: Returns lightweight sandbox/container status summaries for requested
+        IDs.
+      parameters:
+      - description: Sandbox status request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/httpserver.SandboxStatusesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/httpserver.SandboxStatusesResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+      summary: Batch get sandbox status summary
+      tags:
+      - sandboxd-sandbox
 schemes:
 - http
 swagger: "2.0"

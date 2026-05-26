@@ -45,3 +45,150 @@ func TestValidate_PortRules(t *testing.T) {
 		t.Fatal("expected protocol error")
 	}
 }
+
+func TestValidate_ReadinessProbeRules(t *testing.T) {
+	r := validReq()
+	r.Readiness = &ReadinessProbeSpec{
+		Protocol:            "http",
+		Port:                8080,
+		Path:                "/healthz",
+		InitialDelaySeconds: 1,
+		PeriodSeconds:       1,
+		TimeoutSeconds:      1,
+		SuccessThreshold:    1,
+		FailureThreshold:    1,
+	}
+	if err := r.Validate(); err != nil {
+		t.Fatalf("expected valid http readiness, got err=%v", err)
+	}
+
+	r = validReq()
+	r.Readiness = &ReadinessProbeSpec{
+		Protocol:            "http",
+		Port:                8080,
+		InitialDelaySeconds: 1,
+		PeriodSeconds:       1,
+		TimeoutSeconds:      1,
+		SuccessThreshold:    1,
+		FailureThreshold:    1,
+	}
+	if err := r.Validate(); err == nil {
+		t.Fatal("expected http readiness path validation error")
+	}
+}
+
+func TestValidate_ReadinessProbeInvalidCases(t *testing.T) {
+	base := validReq()
+	cases := []struct {
+		name  string
+		probe ReadinessProbeSpec
+	}{
+		{
+			name: "unsupported protocol",
+			probe: ReadinessProbeSpec{
+				Protocol:            "udp",
+				Port:                8080,
+				InitialDelaySeconds: 1,
+				PeriodSeconds:       1,
+				TimeoutSeconds:      1,
+				SuccessThreshold:    1,
+				FailureThreshold:    1,
+			},
+		},
+		{
+			name: "invalid port",
+			probe: ReadinessProbeSpec{
+				Protocol:            "tcp",
+				Port:                0,
+				InitialDelaySeconds: 1,
+				PeriodSeconds:       1,
+				TimeoutSeconds:      1,
+				SuccessThreshold:    1,
+				FailureThreshold:    1,
+			},
+		},
+		{
+			name: "http path must start slash",
+			probe: ReadinessProbeSpec{
+				Protocol:            "http",
+				Port:                8080,
+				Path:                "healthz",
+				InitialDelaySeconds: 1,
+				PeriodSeconds:       1,
+				TimeoutSeconds:      1,
+				SuccessThreshold:    1,
+				FailureThreshold:    1,
+			},
+		},
+		{
+			name: "initial delay invalid",
+			probe: ReadinessProbeSpec{
+				Protocol:            "tcp",
+				Port:                8080,
+				InitialDelaySeconds: 0,
+				PeriodSeconds:       1,
+				TimeoutSeconds:      1,
+				SuccessThreshold:    1,
+				FailureThreshold:    1,
+			},
+		},
+		{
+			name: "period invalid",
+			probe: ReadinessProbeSpec{
+				Protocol:            "tcp",
+				Port:                8080,
+				InitialDelaySeconds: 1,
+				PeriodSeconds:       0,
+				TimeoutSeconds:      1,
+				SuccessThreshold:    1,
+				FailureThreshold:    1,
+			},
+		},
+		{
+			name: "timeout invalid",
+			probe: ReadinessProbeSpec{
+				Protocol:            "tcp",
+				Port:                8080,
+				InitialDelaySeconds: 1,
+				PeriodSeconds:       1,
+				TimeoutSeconds:      0,
+				SuccessThreshold:    1,
+				FailureThreshold:    1,
+			},
+		},
+		{
+			name: "success threshold invalid",
+			probe: ReadinessProbeSpec{
+				Protocol:            "tcp",
+				Port:                8080,
+				InitialDelaySeconds: 1,
+				PeriodSeconds:       1,
+				TimeoutSeconds:      1,
+				SuccessThreshold:    0,
+				FailureThreshold:    1,
+			},
+		},
+		{
+			name: "failure threshold invalid",
+			probe: ReadinessProbeSpec{
+				Protocol:            "tcp",
+				Port:                8080,
+				InitialDelaySeconds: 1,
+				PeriodSeconds:       1,
+				TimeoutSeconds:      1,
+				SuccessThreshold:    1,
+				FailureThreshold:    0,
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := base
+			r.Readiness = &tc.probe
+			if err := r.Validate(); err == nil {
+				t.Fatalf("expected error for case %q", tc.name)
+			}
+		})
+	}
+}

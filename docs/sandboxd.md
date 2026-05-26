@@ -65,6 +65,16 @@ Base URL: `http://localhost:8080`
             "protocol": "tcp"
         }
     ],
+    "readinessProbe": {
+        "protocol": "http",
+        "port": 8080,
+        "path": "/healthz",
+        "initialDelaySeconds": 1,
+        "periodSeconds": 1,
+        "timeoutSeconds": 1,
+        "successThreshold": 2,
+        "failureThreshold": 3
+    },
     "containers": [
         {
             "name": "web",
@@ -97,6 +107,13 @@ Base URL: `http://localhost:8080`
     ]
 }
 ```
+
+- `readinessProbe` is optional.
+- If provided, all fields inside `readinessProbe` are required.
+- `protocol` supports `tcp` and `http`.
+- If `protocol` is `http`, `path` is required and must start with `/`.
+- `http` readiness is considered successful only for status codes in the range `200 <= code < 400`.
+- Readiness checks target the sandbox private endpoint (`sandboxIP:port`) and do not directly validate external reachability on published host ports.
 
 **Response (Accepted)**
 

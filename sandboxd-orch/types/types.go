@@ -107,10 +107,22 @@ type Sandbox struct {
 }
 
 type SandboxSpec struct {
-	Egress     bool                   `json:"egress" yaml:"egress"`
-	TTLSeconds int64                  `json:"ttl_seconds,omitempty" yaml:"ttl_seconds,omitempty"`
-	Ports      []SandboxPortSpec      `json:"ports,omitempty" yaml:"ports,omitempty"`
-	Containers []SandboxContainerSpec `json:"containers" yaml:"containers"`
+	Egress         bool                   `json:"egress" yaml:"egress"`
+	TTLSeconds     int64                  `json:"ttl_seconds,omitempty" yaml:"ttl_seconds,omitempty"`
+	Ports          []SandboxPortSpec      `json:"ports,omitempty" yaml:"ports,omitempty"`
+	Containers     []SandboxContainerSpec `json:"containers" yaml:"containers"`
+	ReadinessProbe *ReadinessProbeSpec    `json:"readiness_probe,omitempty" yaml:"readiness_probe,omitempty"`
+}
+
+type ReadinessProbeSpec struct {
+	Protocol            string `json:"protocol" yaml:"protocol"`
+	Port                int    `json:"port" yaml:"port"`
+	Path                string `json:"path,omitempty" yaml:"path,omitempty"`
+	InitialDelaySeconds int    `json:"initial_delay_seconds" yaml:"initial_delay_seconds"`
+	PeriodSeconds       int    `json:"period_seconds" yaml:"period_seconds"`
+	TimeoutSeconds      int    `json:"timeout_seconds" yaml:"timeout_seconds"`
+	SuccessThreshold    int    `json:"success_threshold" yaml:"success_threshold"`
+	FailureThreshold    int    `json:"failure_threshold" yaml:"failure_threshold"`
 }
 
 type SandboxContainerSpec struct {

@@ -242,6 +242,16 @@ Create a control-plane sandbox object for scheduling and reconciliation.
                 "protocol": "tcp"
             }
         ],
+        "readiness_probe": {
+            "protocol": "http",
+            "port": 80,
+            "path": "/",
+            "initial_delay_seconds": 1,
+            "period_seconds": 1,
+            "timeout_seconds": 1,
+            "success_threshold": 2,
+            "failure_threshold": 3
+        },
         "containers": [
             {
                 "name": "web",
@@ -259,6 +269,10 @@ Create a control-plane sandbox object for scheduling and reconciliation.
     }
 }
 ```
+
+- `spec.readiness_probe` is optional.
+- If set, all readiness probe fields are required.
+- `protocol` supports `tcp` and `http`. If `http` is used, `path` is required and must start with `/`.
 
 **Response**
 
@@ -527,7 +541,7 @@ Query params:
 }
 ```
 
-### POST /api/v1/nodes/{name}/reconcile
+### POST /api/v1/nodes/{id}/reconcile
 
 Trigger sbxlet reconcile on selected node.
 
@@ -552,8 +566,8 @@ Trigger sbxlet reconcile on selected node.
 ### Sandbox `status.phase`
 
 - `Pending`: object created, not yet scheduled
-- `Scheduled`: node and host ports assigned, runtime creation in progress
-- `Running`: sandbox created on node
+- `Scheduled`: node and host ports assigned; sbxlet runtime creation/readiness in progress
+- `Running`: sbxlet reports sandbox `running` (including readiness probe success when configured)
 - `Failed`: scheduling/runtime operation failed
 - `Deleting`: delete flow in progress
 
@@ -577,7 +591,14 @@ Resolved host port mapping used by scheduler and runtime provisioning:
 
 - Sandbox private IP is synchronized from sbxlet sandbox status responses.
 - Orchestrator updates `sandbox.status.ip` during status sync.
-- Orchestrator also performs a short best-effort fetch right after create scheduling, so `ip` can appear earlier in `Running` state.
+- Orchestrator also performs a short best-effort fetch right after create scheduling, so `ip` can appear before `Running`.
+
+### Readiness Probe Semantics
+
+- `spec.readiness_probe` is forwarded to sbxlet as runtime readiness configuration.
+- If `readiness_probe` is omitted, sbxlet transitions to `running` immediately after provisioning is complete.
+- If `readiness_probe` is set, sbxlet stays `creating` until probe success threshold is met; failures beyond threshold transition sbxlet to `error`, which syncs to orchestrator `Failed`.
+- Readiness is evaluated against sandbox-private endpoints (`sandboxIP:port`). This does not guarantee external/published host-port reachability from every client network path.
 
 ## Environment Variables
 

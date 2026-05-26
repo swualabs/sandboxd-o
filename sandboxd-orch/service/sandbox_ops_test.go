@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -105,7 +106,7 @@ func TestSandboxCreateAndSchedule_DynamicPort(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got.Status.Phase != types.SandboxPhaseRunning {
+	if got.Status.Phase != types.SandboxPhaseScheduled {
 		t.Fatalf("phase=%s", got.Status.Phase)
 	}
 
@@ -154,6 +155,16 @@ func TestCreateSandboxOnNode_ForwardsEphemeralStorage(t *testing.T) {
 					EphemeralStorage: "96Mi",
 				},
 			}},
+			ReadinessProbe: &types.ReadinessProbeSpec{
+				Protocol:            "http",
+				Port:                8080,
+				Path:                "/healthz",
+				InitialDelaySeconds: 1,
+				PeriodSeconds:       1,
+				TimeoutSeconds:      1,
+				SuccessThreshold:    1,
+				FailureThreshold:    1,
+			},
 		},
 	})
 	if err != nil {
@@ -168,6 +179,12 @@ func TestCreateSandboxOnNode_ForwardsEphemeralStorage(t *testing.T) {
 
 	if got := captured.Containers[0].Resource.EphemeralStorage; got != "96Mi" {
 		t.Fatalf("ephemeralStorage=%q", got)
+	}
+	if captured.Readiness == nil {
+		t.Fatal("expected readinessProbe to be forwarded")
+	}
+	if captured.Readiness.Protocol != "http" || captured.Readiness.Port != 8080 || captured.Readiness.Path != "/healthz" {
+		t.Fatalf("readinessProbe mismatch: %+v", *captured.Readiness)
 	}
 }
 
@@ -242,7 +259,7 @@ func TestScheduler_AssignsDistinctPortsAcrossSandboxes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got1.Status.Phase != types.SandboxPhaseRunning || got.Status.Phase != types.SandboxPhaseRunning {
+	if got1.Status.Phase != types.SandboxPhaseScheduled || got.Status.Phase != types.SandboxPhaseScheduled {
 		t.Fatalf("unexpected phases sbx-1=%s sbx-2=%s", got1.Status.Phase, got.Status.Phase)
 	}
 
@@ -363,7 +380,7 @@ func TestSandboxCreate_ExternalVisibleImmediatelyAfterRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got.Status.Phase != types.SandboxPhaseRunning {
+	if got.Status.Phase != types.SandboxPhaseScheduled {
 		t.Fatalf("phase=%s", got.Status.Phase)
 	}
 
@@ -487,8 +504,8 @@ func TestHostPortReleasedAfterDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got.Status.Phase != types.SandboxPhaseRunning {
-		t.Fatalf("expected running after reuse of released port, got=%s", got.Status.Phase)
+	if got.Status.Phase != types.SandboxPhaseScheduled {
+		t.Fatalf("expected scheduled after reuse of released port, got=%s", got.Status.Phase)
 	}
 }
 
@@ -571,6 +588,106 @@ func TestCreateSandboxValidationAndTTLFailure(t *testing.T) {
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("expected invalid ttl input, got=%v", err)
 	}
+
+	_, err = s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
+		ID: "bad-readiness",
+		Spec: types.SandboxSpec{
+			Containers: []types.SandboxContainerSpec{{Name: "c", Image: "nginx", Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"}}},
+			ReadinessProbe: &types.ReadinessProbeSpec{
+				Protocol:            "udp",
+				Port:                8080,
+				InitialDelaySeconds: 1,
+				PeriodSeconds:       1,
+				TimeoutSeconds:      1,
+				SuccessThreshold:    1,
+				FailureThreshold:    1,
+			},
+		},
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected invalid readiness protocol input, got=%v", err)
+	}
+
+	_, err = s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
+		ID: "bad-readiness-http-path",
+		Spec: types.SandboxSpec{
+			Containers: []types.SandboxContainerSpec{{Name: "c", Image: "nginx", Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"}}},
+			ReadinessProbe: &types.ReadinessProbeSpec{
+				Protocol:            "http",
+				Port:                8080,
+				InitialDelaySeconds: 1,
+				PeriodSeconds:       1,
+				TimeoutSeconds:      1,
+				SuccessThreshold:    1,
+				FailureThreshold:    1,
+			},
+		},
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected invalid readiness http path input, got=%v", err)
+	}
+}
+
+func TestCreateSandboxValidation_ReadinessThresholdFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer server.Close()
+	s := newServiceWithNode(t, server)
+	defer s.Close()
+
+	validProbe := func() *types.ReadinessProbeSpec {
+		return &types.ReadinessProbeSpec{
+			Protocol:            "http",
+			Port:                8080,
+			Path:                "/healthz",
+			InitialDelaySeconds: 1,
+			PeriodSeconds:       1,
+			TimeoutSeconds:      1,
+			SuccessThreshold:    1,
+			FailureThreshold:    1,
+		}
+	}
+
+	cases := []struct {
+		name      string
+		mutate    func(*types.ReadinessProbeSpec)
+		shouldErr bool
+	}{
+		{name: "initial delay invalid", mutate: func(p *types.ReadinessProbeSpec) { p.InitialDelaySeconds = 0 }, shouldErr: true},
+		{name: "period invalid", mutate: func(p *types.ReadinessProbeSpec) { p.PeriodSeconds = 0 }, shouldErr: true},
+		{name: "timeout invalid", mutate: func(p *types.ReadinessProbeSpec) { p.TimeoutSeconds = 0 }, shouldErr: true},
+		{name: "success threshold invalid", mutate: func(p *types.ReadinessProbeSpec) { p.SuccessThreshold = 0 }, shouldErr: true},
+		{name: "failure threshold invalid", mutate: func(p *types.ReadinessProbeSpec) { p.FailureThreshold = 0 }, shouldErr: true},
+		{name: "tcp path optional", mutate: func(p *types.ReadinessProbeSpec) { p.Protocol, p.Path = "tcp", "" }, shouldErr: false},
+		{name: "http path slash required", mutate: func(p *types.ReadinessProbeSpec) { p.Path = "healthz" }, shouldErr: true},
+	}
+
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := validProbe()
+			tc.mutate(p)
+			_, err := s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
+				ID: fmt.Sprintf("readiness-case-%d", i),
+				Spec: types.SandboxSpec{
+					Containers: []types.SandboxContainerSpec{{
+						Name:     "c",
+						Image:    "nginx",
+						Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"},
+					}},
+					ReadinessProbe: p,
+				},
+			})
+
+			if tc.shouldErr && !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("expected ErrInvalidInput, got=%v", err)
+			}
+
+			if !tc.shouldErr && err != nil {
+				t.Fatalf("expected success, got=%v", err)
+			}
+		})
+	}
 }
 
 func TestCreateSandbox_HostPortInputIgnoredForCompatibility(t *testing.T) {
@@ -607,7 +724,7 @@ func TestCreateSandbox_HostPortInputIgnoredForCompatibility(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got.Status.Phase != types.SandboxPhaseRunning {
+	if got.Status.Phase != types.SandboxPhaseScheduled {
 		t.Fatalf("phase=%s", got.Status.Phase)
 	}
 
