@@ -162,15 +162,15 @@ func (s *Service) createSandbox(ctx context.Context, req model.CreateSandboxRequ
 	defer opCancel()
 	ctx = opCtx
 
+	if err := req.Validate(); err != nil {
+		return nil, err
+	}
+
 	unlock, err := s.acquireSandboxLock(req.ID)
 	if err != nil {
 		return nil, err
 	}
 	defer unlock()
-
-	if err := req.Validate(); err != nil {
-		return nil, err
-	}
 
 	if _, err := s.store.Load(req.ID); err == nil {
 		return nil, fmt.Errorf("sandbox already exists: %s", req.ID)
@@ -411,6 +411,10 @@ func (s *Service) markSandboxError(sandboxID string, err error) {
 }
 
 func (s *Service) DeleteSandbox(ctx context.Context, sandboxID string) error {
+	if err := model.ValidateSandboxID(sandboxID); err != nil {
+		return err
+	}
+
 	unlock, err := s.acquireSandboxLock(sandboxID)
 	if err != nil {
 		return err
@@ -499,6 +503,10 @@ func (s *Service) ListSandboxesPage(_ context.Context, cursor string, limit int)
 }
 
 func (s *Service) GetSandbox(ctx context.Context, id string) (*model.Sandbox, error) {
+	if err := model.ValidateSandboxID(id); err != nil {
+		return nil, err
+	}
+
 	sbx, err := s.store.Load(id)
 	if err != nil {
 		return nil, err
@@ -760,7 +768,7 @@ func (s *Service) probeReadiness(ctx context.Context, httpClient *http.Client, a
 }
 
 func (s *Service) hasRuntimeArtifacts(sandboxID string) bool {
-	if sandboxID == "" {
+	if err := model.ValidateSandboxID(sandboxID); err != nil {
 		return false
 	}
 

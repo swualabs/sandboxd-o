@@ -32,6 +32,24 @@ func TestValidate_DuplicateContainer(t *testing.T) {
 	}
 }
 
+func TestValidate_InvalidSandboxID(t *testing.T) {
+	cases := []string{
+		"../../tmp/hello",
+		"sbx/1",
+		" sbx-1",
+		"sbx-1 ",
+		"",
+	}
+
+	for _, id := range cases {
+		r := validReq()
+		r.ID = id
+		if err := r.Validate(); err == nil {
+			t.Fatalf("expected invalid id error for %q", id)
+		}
+	}
+}
+
 func TestValidate_PortRules(t *testing.T) {
 	r := validReq()
 	r.Ports = []PortMapping{{HostPort: 80, ContainerPort: 80, Protocol: "tcp"}}

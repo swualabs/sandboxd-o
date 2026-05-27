@@ -482,6 +482,10 @@ func (s *Service) ensureSandboxTmpfsMount(sandboxID, containerName, kind string,
 		return "", nil
 	}
 
+	if err := model.ValidateSandboxID(sandboxID); err != nil {
+		return "", err
+	}
+
 	base := filepath.Join(s.cfg.StateBaseDir, sandboxID, "tmpfs", containerName, kind)
 	if err := os.MkdirAll(base, 0o755); err != nil {
 		return "", fmt.Errorf("mkdir tmpfs mount path %s: %w", base, err)
@@ -585,7 +589,7 @@ func (s *Service) deleteSandboxRuntimeArtifacts(ctx context.Context, sbx *model.
 }
 
 func (s *Service) cleanupSandboxTmpfsMounts(sandboxID string) {
-	if strings.TrimSpace(sandboxID) == "" {
+	if err := model.ValidateSandboxID(sandboxID); err != nil {
 		return
 	}
 
@@ -617,11 +621,11 @@ func resolvePath(path string) string {
 }
 
 func (s *Service) cleanupCNICache(sandboxID string) error {
-	if sandboxID == "" {
+	if err := model.ValidateSandboxID(sandboxID); err != nil {
 		return nil
 	}
 
-	_ = os.RemoveAll("/var/lib/cni/" + sandboxID)
+	_ = os.RemoveAll(filepath.Join("/var/lib/cni", sandboxID))
 	return nil
 }
 

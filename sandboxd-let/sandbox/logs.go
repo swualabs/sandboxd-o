@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"sandboxd-o/sandboxd-let/model"
 )
 
 var ErrInvalidCursor = errors.New("invalid cursor")
@@ -33,7 +35,7 @@ func validatePathToken(v string) error {
 }
 
 func (s *Service) containerLogPath(sandboxID, containerName string) (string, error) {
-	if err := validatePathToken(sandboxID); err != nil {
+	if err := model.ValidateSandboxID(sandboxID); err != nil {
 		return "", fmt.Errorf("invalid sandbox id")
 	}
 

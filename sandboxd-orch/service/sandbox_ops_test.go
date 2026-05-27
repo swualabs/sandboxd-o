@@ -569,6 +569,16 @@ func TestCreateSandboxValidationAndTTLFailure(t *testing.T) {
 	}
 
 	_, err = s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
+		ID: "../../../../tmp/hello",
+		Spec: types.SandboxSpec{
+			Containers: []types.SandboxContainerSpec{{Name: "c", Image: "nginx", Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"}}},
+		},
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected invalid sandbox id input, got=%v", err)
+	}
+
+	_, err = s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
 		ID: "bad-cpu",
 		Spec: types.SandboxSpec{
 			Containers: []types.SandboxContainerSpec{{Name: "c", Image: "nginx", Resource: types.SandboxResource{CPU: "100x", Memory: "64Mi"}}},

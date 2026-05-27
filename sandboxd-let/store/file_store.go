@@ -22,6 +22,10 @@ func NewFileStore(baseDir string) (*FileStore, error) {
 }
 
 func (s *FileStore) Save(sb *model.Sandbox) error {
+	if err := model.ValidateSandboxID(sb.ID); err != nil {
+		return err
+	}
+
 	dir := filepath.Join(s.baseDir, sb.ID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -36,6 +40,10 @@ func (s *FileStore) Save(sb *model.Sandbox) error {
 }
 
 func (s *FileStore) Load(id string) (*model.Sandbox, error) {
+	if err := model.ValidateSandboxID(id); err != nil {
+		return nil, err
+	}
+
 	b, err := os.ReadFile(filepath.Join(s.baseDir, id, "state.json"))
 	if err != nil {
 		return nil, err
@@ -50,6 +58,10 @@ func (s *FileStore) Load(id string) (*model.Sandbox, error) {
 }
 
 func (s *FileStore) Delete(id string) error {
+	if err := model.ValidateSandboxID(id); err != nil {
+		return err
+	}
+
 	err := os.RemoveAll(filepath.Join(s.baseDir, id))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

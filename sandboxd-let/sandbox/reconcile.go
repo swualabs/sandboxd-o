@@ -160,6 +160,10 @@ func (s *Service) ListRuntimeSandboxIDs(ctx context.Context) ([]string, error) {
 }
 
 func (s *Service) IsSandboxHealthy(ctx context.Context, sandboxID string) (bool, error) {
+	if err := model.ValidateSandboxID(sandboxID); err != nil {
+		return false, err
+	}
+
 	ctx = namespaces.WithNamespace(ctx, s.namespace)
 	sbx, err := s.store.Load(sandboxID)
 	if err != nil {
@@ -177,6 +181,10 @@ func (s *Service) IsSandboxHealthy(ctx context.Context, sandboxID string) (bool,
 }
 
 func (s *Service) CleanupSandboxResources(ctx context.Context, sandboxID string) error {
+	if err := model.ValidateSandboxID(sandboxID); err != nil {
+		return err
+	}
+
 	ctx = namespaces.WithNamespace(ctx, s.namespace)
 	sbx, err := s.store.Load(sandboxID)
 	if err == nil {
@@ -191,6 +199,10 @@ func (s *Service) CleanupSandboxResources(ctx context.Context, sandboxID string)
 }
 
 func (s *Service) cleanupOrphanRuntimeSandbox(ctx context.Context, sandboxID string) error {
+	if err := model.ValidateSandboxID(sandboxID); err != nil {
+		return err
+	}
+
 	tmp := &model.Sandbox{ID: sandboxID, Namespace: s.namespace, IP: s.sandboxIPFromCNICache(sandboxID), BridgeName: s.bridgeIF, Containers: map[string]model.ContainerState{}}
 	if podID, ok := s.findManagedPodSandboxID(ctx, sandboxID); ok {
 		tmp.PauseID = podID
@@ -206,6 +218,10 @@ func (s *Service) cleanupOrphanRuntimeSandbox(ctx context.Context, sandboxID str
 }
 
 func (s *Service) sandboxIPFromCNICache(sandboxID string) string {
+	if err := model.ValidateSandboxID(sandboxID); err != nil {
+		return ""
+	}
+
 	ip, err := network.LookupSandboxIPv4FromResultCache(sandboxID)
 	if err != nil {
 		return ""

@@ -49,3 +49,23 @@ func TestFileStore_CRUD(t *testing.T) {
 		t.Fatalf("nested NewFileStore err=%v", err)
 	}
 }
+
+func TestFileStore_RejectsTraversalID(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore err=%v", err)
+	}
+
+	if _, err := s.Load("../../tmp/hello"); err == nil {
+		t.Fatal("expected traversal id load error")
+	}
+
+	if err := s.Delete("../../tmp/hello"); err == nil {
+		t.Fatal("expected traversal id delete error")
+	}
+
+	if err := s.Save(&model.Sandbox{ID: "../../tmp/hello"}); err == nil {
+		t.Fatal("expected traversal id save error")
+	}
+}

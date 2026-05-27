@@ -347,6 +347,10 @@ func (h *Handler) NodeCreateSandbox(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
+	if err := req.Validate(); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
 
 	out, err := client.CreateSandbox(c.Request.Context(), req)
 	respondProxy(c, out, err)
