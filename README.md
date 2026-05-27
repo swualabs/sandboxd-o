@@ -1167,10 +1167,11 @@ REST API documentation can be found in [docs/orchestrator.md](./docs/orchestrato
 
 # Appendix F. Contribution and Contributors
 
-| Name          | GitHub                               | Role               |
-| ------------- | ------------------------------------ | ------------------ |
-| Kim Jun Young | [@yulmwu](https://github.com/yulmwu) | Author, Maintainer |
-| ...           | ...                                  | ...                |
+| Name          | GitHub                                     | Role                              |
+| ------------- | ------------------------------------------ | --------------------------------- |
+| Kim Jun Young | [@yulmwu](https://github.com/yulmwu)       | Author, Maintainer                |
+| BYTE256       | [@byte16384](https://github.com/byte16384) | Vulnerability Reporter/Researcher |
+| ...           | ...                                        | ...                               |
 
 # Appendix G. MIT License
 
