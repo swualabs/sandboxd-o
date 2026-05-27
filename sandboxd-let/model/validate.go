@@ -2,12 +2,36 @@ package model
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
-func (r CreateSandboxRequest) Validate() error {
-	if r.ID == "" {
+func ValidateSandboxID(id string) error {
+	v := strings.TrimSpace(id)
+	if v == "" {
 		return fmt.Errorf("id is required")
+	}
+
+	if v != id {
+		return fmt.Errorf("id must not contain leading or trailing whitespace")
+	}
+
+	if strings.Contains(v, "/") || strings.Contains(v, "\\") || strings.Contains(v, "..") {
+		return fmt.Errorf("id contains invalid path characters")
+	}
+
+	if !safeSandboxIDRe.MatchString(v) {
+		return fmt.Errorf("id contains unsupported characters")
+	}
+
+	return nil
+}
+
+var safeSandboxIDRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
+
+func (r CreateSandboxRequest) Validate() error {
+	if err := ValidateSandboxID(r.ID); err != nil {
+		return err
 	}
 
 	if len(r.Containers) < 1 {

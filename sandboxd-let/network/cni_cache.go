@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"sandboxd-o/sandboxd-let/model"
 )
 
 type cniCacheFile struct {
@@ -20,8 +22,8 @@ type cniCacheFile struct {
 // LookupSandboxIPv4FromResultCache reads CNI result cache for a sandbox id
 // and returns the assigned IPv4 address.
 func LookupSandboxIPv4FromResultCache(sandboxID string) (string, error) {
-	if sandboxID == "" {
-		return "", fmt.Errorf("sandbox id is required")
+	if err := model.ValidateSandboxID(sandboxID); err != nil {
+		return "", err
 	}
 
 	candidates := make([]string, 0)

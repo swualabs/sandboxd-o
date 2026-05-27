@@ -569,6 +569,26 @@ func TestCreateSandboxValidationAndTTLFailure(t *testing.T) {
 	}
 
 	_, err = s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
+		ID: "../../../../tmp/hello",
+		Spec: types.SandboxSpec{
+			Containers: []types.SandboxContainerSpec{{Name: "c", Image: "nginx", Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"}}},
+		},
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected invalid sandbox id input, got=%v", err)
+	}
+
+	_, err = s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
+		ID: " sbx-leading-space",
+		Spec: types.SandboxSpec{
+			Containers: []types.SandboxContainerSpec{{Name: "c", Image: "nginx", Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"}}},
+		},
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected whitespace-padded sandbox id input to be invalid, got=%v", err)
+	}
+
+	_, err = s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
 		ID: "bad-cpu",
 		Spec: types.SandboxSpec{
 			Containers: []types.SandboxContainerSpec{{Name: "c", Image: "nginx", Resource: types.SandboxResource{CPU: "100x", Memory: "64Mi"}}},
@@ -966,6 +986,21 @@ func TestDeleteSandbox_EmptyID(t *testing.T) {
 
 	if err := s.DeleteSandbox(context.Background(), " "); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("expected invalid input, got=%v", err)
+	}
+
+	if err := s.DeleteSandbox(context.Background(), " sbx-1"); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected whitespace-padded id to be invalid, got=%v", err)
+	}
+}
+
+func TestGetSandbox_WhitespacePaddedID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer server.Close()
+	s := newServiceWithNode(t, server)
+	defer s.Close()
+
+	if _, err := s.GetSandbox(context.Background(), " sbx-1"); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected whitespace-padded id to be invalid, got=%v", err)
 	}
 }
 

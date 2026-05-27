@@ -139,6 +139,7 @@ func TestHandlers_AllEndpoints(t *testing.T) {
 	must(http.MethodGet, "/nodes/n1/sandboxes?cursor=a&limit=10", nil, 200)
 	must(http.MethodGet, "/nodes/n1/sandboxes/s1", nil, 200)
 	must(http.MethodPost, "/nodes/n1/sandboxes", []byte(`{"id":"s1","egress":true,"containers":[{"name":"c1","image":"nginx","resource":{"cpu":"100m","memory":"64Mi","ephemeralStorage":"96Mi"}}],"ports":[]}`), 200)
+	must(http.MethodPost, "/nodes/n1/sandboxes", []byte(`{"id":"../../../../tmp/hello","egress":false,"containers":[{"name":"c1","image":"nginx","resource":{"cpu":"100m","memory":"64Mi","ephemeralStorage":"96Mi"}}],"ports":[]}`), 400)
 	must(http.MethodPost, "/nodes/n1/sandboxes", []byte(`{"id":"s1"`), 400)
 	must(http.MethodDelete, "/nodes/n1/sandboxes/s1", nil, 200)
 	must(http.MethodGet, "/nodes/n1/sandboxes/s1/containers/c1/logs?limit=100", nil, 200)
