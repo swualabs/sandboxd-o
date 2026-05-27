@@ -36,7 +36,7 @@ func validatePathToken(v string) error {
 
 func (s *Service) containerLogPath(sandboxID, containerName string) (string, error) {
 	if err := model.ValidateSandboxID(sandboxID); err != nil {
-		return "", fmt.Errorf("invalid sandbox id")
+		return "", fmt.Errorf("invalid sandbox id: %w", err)
 	}
 
 	if err := validatePathToken(containerName); err != nil {

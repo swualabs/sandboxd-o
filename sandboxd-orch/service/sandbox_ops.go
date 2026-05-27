@@ -50,7 +50,16 @@ func (s *Service) CreateSandbox(ctx context.Context, req types.CreateSandboxObje
 }
 
 func (s *Service) GetSandbox(ctx context.Context, id string) (*types.Sandbox, error) {
+	rawID := id
 	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, fmt.Errorf("%w: sandbox id is required", ErrInvalidInput)
+	}
+
+	if rawID != id {
+		return nil, fmt.Errorf("%w: sandbox id must not contain leading or trailing whitespace", ErrInvalidInput)
+	}
+
 	if err := model.ValidateSandboxID(id); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
@@ -63,9 +72,14 @@ func (s *Service) ListSandboxes(ctx context.Context) ([]types.Sandbox, error) {
 }
 
 func (s *Service) DeleteSandbox(ctx context.Context, id string) error {
+	rawID := id
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return fmt.Errorf("%w: sandbox id is required", ErrInvalidInput)
+	}
+
+	if rawID != id {
+		return fmt.Errorf("%w: sandbox id must not contain leading or trailing whitespace", ErrInvalidInput)
 	}
 
 	if err := model.ValidateSandboxID(id); err != nil {
@@ -134,7 +148,7 @@ func (s *Service) finalizeSandboxDelete(ctx context.Context, sbx types.Sandbox) 
 }
 
 func validateSandboxCreate(req types.CreateSandboxObjectRequest) error {
-	if err := model.ValidateSandboxID(strings.TrimSpace(req.ID)); err != nil {
+	if err := model.ValidateSandboxID(req.ID); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
 
