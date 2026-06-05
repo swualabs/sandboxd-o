@@ -257,35 +257,20 @@ func (s *Server) reconcile(c *gin.Context) {
 
 // getContainerLogs godoc
 // @Summary Get container logs
-// @Description Reads container logs with cursor pagination over byte offsets.
+// @Description Reads all container logs.
 // @Tags sandboxd-logs
 // @Produce json
 // @Param id path string true "Sandbox ID"
 // @Param name path string true "Container name"
-// @Param cursor query string false "Cursor offset"
-// @Param limit query int false "Max lines (default 100)"
 // @Success 200 {object} ContainerLogsResponse
-// @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /v1/sandboxes/{id}/containers/{name}/logs [get]
 func (s *Server) getContainerLogs(c *gin.Context) {
-	cursor := c.Query("cursor")
-	limitRaw := c.Query("limit")
-	limit := 100
-	if limitRaw != "" {
-		n, err := strconv.Atoi(limitRaw)
-		if err != nil || n < 0 {
-			respondErrorMessage(c, http.StatusBadRequest, "invalid limit")
-			return
-		}
-		limit = n
-	}
-
 	sandboxID := c.Param("id")
 	containerName := c.Param("name")
 
-	page, err := s.svc.GetContainerLogs(c.Request.Context(), sandboxID, containerName, cursor, limit)
+	logs, err := s.svc.GetContainerLogs(c.Request.Context(), sandboxID, containerName)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			sbx, sbErr := s.svc.GetSandbox(c.Request.Context(), sandboxID)
@@ -294,11 +279,7 @@ func (s *Server) getContainerLogs(c *gin.Context) {
 					c.JSON(http.StatusOK, ContainerLogsResponse{
 						SandboxID: sandboxID,
 						Container: containerName,
-						Logs: &sandbox.LogsPage{
-							Lines:      []string{},
-							NextCursor: "0",
-							HasMore:    false,
-						},
+						Logs:      &sandbox.Logs{Lines: []string{}},
 					})
 					return
 				}
@@ -308,8 +289,29 @@ func (s *Server) getContainerLogs(c *gin.Context) {
 			return
 		}
 
-		if errors.Is(err, sandbox.ErrInvalidCursor) {
-			respondErrorMessage(c, http.StatusBadRequest, "invalid cursor")
+		respondErrorMessage(c, http.StatusInternalServerError, "failed to read logs")
+		return
+	}
+
+	c.JSON(http.StatusOK, ContainerLogsResponse{SandboxID: sandboxID, Container: containerName, Logs: logs})
+}
+
+// getSandboxLogs godoc
+// @Summary Get sandbox logs
+// @Description Reads all sandbox container logs. Each line is prefixed with the container name and CRI timestamped lines are sorted by time.
+// @Tags sandboxd-logs
+// @Produce json
+// @Param id path string true "Sandbox ID"
+// @Success 200 {object} SandboxLogsResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /v1/sandboxes/{id}/logs [get]
+func (s *Server) getSandboxLogs(c *gin.Context) {
+	sandboxID := c.Param("id")
+	logs, err := s.svc.GetSandboxLogs(c.Request.Context(), sandboxID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			respondErrorMessage(c, http.StatusNotFound, "logs not found")
 			return
 		}
 
@@ -317,5 +319,5 @@ func (s *Server) getContainerLogs(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, ContainerLogsResponse{SandboxID: sandboxID, Container: containerName, Logs: page})
+	c.JSON(http.StatusOK, SandboxLogsResponse{SandboxID: sandboxID, Logs: logs})
 }

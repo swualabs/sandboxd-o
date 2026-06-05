@@ -53,7 +53,7 @@ func NewRoot() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&opts.Node, "node", "", "node id for proxy APIs")
 	cmd.PersistentFlags().DurationVar(&opts.Timeout, "timeout", 10*time.Second, "request timeout")
 	cmd.PersistentFlags().StringVarP(&opts.Output, "output", "o", "", "output format: json|yaml|wide")
-	cmd.PersistentFlags().IntVar(&opts.Limit, "limit", 100, "log/list limit")
+	cmd.PersistentFlags().IntVar(&opts.Limit, "limit", 100, "list limit")
 
 	cmd.AddCommand(newGetCommand(opts))
 	cmd.AddCommand(newSpecCommand(opts))

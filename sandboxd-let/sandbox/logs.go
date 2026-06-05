@@ -8,18 +8,23 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
+	"sort"
 	"strings"
+	"time"
 
 	"sandboxd-o/sandboxd-let/model"
 )
 
-var ErrInvalidCursor = errors.New("invalid cursor")
+type Logs struct {
+	Lines []string `json:"lines"`
+}
 
-type LogsPage struct {
-	Lines      []string `json:"lines"`
-	NextCursor string   `json:"next_cursor,omitempty"`
-	HasMore    bool     `json:"has_more"`
+type logEntry struct {
+	line      string
+	ts        time.Time
+	hasTime   bool
+	container int
+	seq       int
 }
 
 func validatePathToken(v string) error {
@@ -53,26 +58,9 @@ func (s *Service) containerLogPath(sandboxID, containerName string) (string, err
 	return path, nil
 }
 
-func (s *Service) GetContainerLogs(_ context.Context, sandboxID, containerName, cursor string, limit int) (*LogsPage, error) {
+func (s *Service) GetContainerLogs(_ context.Context, sandboxID, containerName string) (*Logs, error) {
 	if sandboxID == "" || containerName == "" {
 		return nil, fmt.Errorf("sandbox id and container name are required")
-	}
-
-	if limit <= 0 {
-		limit = 100
-	}
-
-	if limit > 1000 {
-		limit = 1000
-	}
-
-	offset := int64(0)
-	if strings.TrimSpace(cursor) != "" {
-		v, err := strconv.ParseInt(cursor, 10, 64)
-		if err != nil || v < 0 {
-			return nil, ErrInvalidCursor
-		}
-		offset = v
 	}
 
 	path, err := s.containerLogPath(sandboxID, containerName)
@@ -80,36 +68,155 @@ func (s *Service) GetContainerLogs(_ context.Context, sandboxID, containerName, 
 		return nil, err
 	}
 
+	lines, err := readLogLines(path, "")
+	if err != nil {
+		return nil, err
+	}
+
+	return &Logs{Lines: lines}, nil
+}
+
+func (s *Service) GetSandboxLogs(_ context.Context, sandboxID string) (*Logs, error) {
+	if sandboxID == "" {
+		return nil, fmt.Errorf("sandbox id is required")
+	}
+
+	if err := model.ValidateSandboxID(sandboxID); err != nil {
+		return nil, fmt.Errorf("invalid sandbox id: %w", err)
+	}
+
+	sbx, err := s.store.Load(sandboxID)
+	if err != nil {
+		return nil, err
+	}
+
+	names := make([]string, 0, len(sbx.Containers))
+	for name := range sbx.Containers {
+		if err := validatePathToken(name); err != nil {
+			return nil, fmt.Errorf("invalid container name")
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	entries := []logEntry{}
+	seq := 0
+	for containerIndex, name := range names {
+		path, err := s.containerLogPath(sandboxID, name)
+		if err != nil {
+			return nil, err
+		}
+
+		containerEntries, err := readLogEntries(path, "["+name+"] ", containerIndex, &seq)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+
+			return nil, err
+		}
+
+		entries = append(entries, containerEntries...)
+	}
+
+	sort.SliceStable(entries, func(i, j int) bool {
+		left, right := entries[i], entries[j]
+		if left.hasTime && right.hasTime {
+			if left.ts.Equal(right.ts) {
+				return left.seq < right.seq
+			}
+
+			return left.ts.Before(right.ts)
+		}
+
+		if left.hasTime != right.hasTime {
+			return left.hasTime
+		}
+
+		if left.container == right.container {
+			return left.seq < right.seq
+		}
+
+		return left.container < right.container
+	})
+
+	lines := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		lines = append(lines, entry.line)
+	}
+
+	return &Logs{Lines: lines}, nil
+}
+
+func readLogLines(path, prefix string) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
-	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		return nil, err
-	}
-
 	r := bufio.NewReader(f)
-	lines := make([]string, 0, limit)
-	next := offset
-	for len(lines) < limit {
+	lines := []string{}
+	for {
 		line, err := r.ReadString('\n')
 		if len(line) > 0 {
-			next += int64(len(line))
-			lines = append(lines, strings.TrimRight(line, "\r\n"))
+			lines = append(lines, prefix+strings.TrimRight(line, "\r\n"))
 		}
 
 		if err == io.EOF {
-			return &LogsPage{Lines: lines, NextCursor: strconv.FormatInt(next, 10), HasMore: false}, nil
+			return lines, nil
 		}
 
 		if err != nil {
 			return nil, err
 		}
 	}
+}
 
-	_, err = r.Peek(1)
-	hasMore := err == nil
-	return &LogsPage{Lines: lines, NextCursor: strconv.FormatInt(next, 10), HasMore: hasMore}, nil
+func readLogEntries(path, prefix string, containerIndex int, seq *int) ([]logEntry, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	r := bufio.NewReader(f)
+	entries := []logEntry{}
+	for {
+		line, err := r.ReadString('\n')
+		if len(line) > 0 {
+			line = strings.TrimRight(line, "\r\n")
+			ts, ok := parseCRILogTimestamp(line)
+			entries = append(entries, logEntry{
+				line:      prefix + line,
+				ts:        ts,
+				hasTime:   ok,
+				container: containerIndex,
+				seq:       *seq,
+			})
+			*seq = *seq + 1
+		}
+
+		if err == io.EOF {
+			return entries, nil
+		}
+
+		if err != nil {
+			return nil, err
+		}
+	}
+}
+
+func parseCRILogTimestamp(line string) (time.Time, bool) {
+	tsRaw, _, ok := strings.Cut(line, " ")
+	if !ok || tsRaw == "" {
+		return time.Time{}, false
+	}
+
+	ts, err := time.Parse(time.RFC3339Nano, tsRaw)
+	if err != nil {
+		return time.Time{}, false
+	}
+
+	return ts, true
 }

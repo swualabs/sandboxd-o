@@ -386,8 +386,6 @@ func (h *Handler) NodeDeleteSandbox(c *gin.Context) {
 // @Param id path string true "Node id"
 // @Param sandboxId path string true "Sandbox ID"
 // @Param container path string true "Container name"
-// @Param cursor query string false "Cursor offset"
-// @Param limit query int false "Line limit"
 // @Success 200 {object} ProxyResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 502 {object} ErrorResponse
@@ -399,8 +397,29 @@ func (h *Handler) NodeContainerLogs(c *gin.Context) {
 		return
 	}
 
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
-	out, err := client.GetContainerLogs(c.Request.Context(), c.Param("sandboxId"), c.Param("container"), c.Query("cursor"), limit)
+	out, err := client.GetContainerLogs(c.Request.Context(), c.Param("sandboxId"), c.Param("container"))
+	respondProxy(c, out, err)
+}
+
+// NodeSandboxLogs godoc
+// @Summary Proxy sandbox logs
+// @Description Proxies sandbox logs request to selected node sandboxd.
+// @Tags orchestrator-proxy
+// @Produce json
+// @Param id path string true "Node id"
+// @Param sandboxId path string true "Sandbox ID"
+// @Success 200 {object} ProxyResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 502 {object} ErrorResponse
+// @Router /api/v1/nodes/{id}/sandboxes/{sandboxId}/logs [get]
+func (h *Handler) NodeSandboxLogs(c *gin.Context) {
+	client, _, err := h.svc.SandboxOpClientForNode(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		respondNodeErr(c, err)
+		return
+	}
+
+	out, err := client.GetSandboxLogs(c.Request.Context(), c.Param("sandboxId"))
 	respondProxy(c, out, err)
 }
 

@@ -5,7 +5,7 @@ definitions:
       container:
         type: string
       logs:
-        $ref: '#/definitions/sandbox.LogsPage'
+        $ref: '#/definitions/sandbox.Logs'
       sandbox_id:
         type: string
     type: object
@@ -67,6 +67,13 @@ definitions:
     properties:
       ok:
         type: boolean
+    type: object
+  httpserver.SandboxLogsResponse:
+    properties:
+      logs:
+        $ref: '#/definitions/sandbox.Logs'
+      sandbox_id:
+        type: string
     type: object
   httpserver.SandboxStatusesRequest:
     properties:
@@ -261,16 +268,12 @@ definitions:
       updatedAt:
         type: string
     type: object
-  sandbox.LogsPage:
+  sandbox.Logs:
     properties:
-      has_more:
-        type: boolean
       lines:
         items:
           type: string
         type: array
-      next_cursor:
-        type: string
     type: object
 info:
   contact: {}
@@ -429,7 +432,7 @@ paths:
       - sandboxd-sandbox
   /v1/sandboxes/{id}/containers/{name}/logs:
     get:
-      description: Reads container logs with cursor pagination over byte offsets.
+      description: Reads all container logs.
       parameters:
       - description: Sandbox ID
         in: path
@@ -441,14 +444,6 @@ paths:
         name: name
         required: true
         type: string
-      - description: Cursor offset
-        in: query
-        name: cursor
-        type: string
-      - description: Max lines (default 100)
-        in: query
-        name: limit
-        type: integer
       produces:
       - application/json
       responses:
@@ -456,10 +451,6 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/httpserver.ContainerLogsResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/httpserver.ErrorResponse'
         "404":
           description: Not Found
           schema:
@@ -469,6 +460,34 @@ paths:
           schema:
             $ref: '#/definitions/httpserver.ErrorResponse'
       summary: Get container logs
+      tags:
+      - sandboxd-logs
+  /v1/sandboxes/{id}/logs:
+    get:
+      description: Reads all sandbox container logs. Each line is prefixed with the
+        container name and CRI timestamped lines are sorted by time.
+      parameters:
+      - description: Sandbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/httpserver.SandboxLogsResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/httpserver.ErrorResponse'
+      summary: Get sandbox logs
       tags:
       - sandboxd-logs
   /v1/sandboxes/statuses:

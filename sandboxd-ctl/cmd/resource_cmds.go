@@ -317,10 +317,10 @@ func newDeleteCommand(opts *Options) *cobra.Command {
 
 func newLogsCommand(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "logs <resource/name> <container>",
+		Use:     "logs <resource/name> [container]",
 		Aliases: []string{"log", "l"},
-		Short:   "Get container logs via orchestrator node proxy",
-		Args:    cobra.ExactArgs(2),
+		Short:   "Get sandbox logs via orchestrator node proxy",
+		Args:    cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ref, err := parseObjectRef(args[0])
 			if err != nil {
@@ -329,11 +329,6 @@ func newLogsCommand(opts *Options) *cobra.Command {
 
 			if err := ensureSandboxResource(ref.Resource); err != nil {
 				return err
-			}
-
-			container := strings.TrimSpace(args[1])
-			if container == "" {
-				return fmt.Errorf("container name is required")
 			}
 
 			c := mustClient(opts)
@@ -355,7 +350,18 @@ func newLogsCommand(opts *Options) *cobra.Command {
 				}
 			}
 
-			out, err := c.NodeContainerLogs(ctx, node, ref.Name, container, opts.Limit)
+			var out map[string]any
+			if len(args) == 2 {
+				container := strings.TrimSpace(args[1])
+				if container == "" {
+					return fmt.Errorf("container name is required")
+				}
+
+				out, err = c.NodeContainerLogs(ctx, node, ref.Name, container)
+			} else {
+				out, err = c.NodeSandboxLogs(ctx, node, ref.Name)
+			}
+
 			if err != nil {
 				return err
 			}

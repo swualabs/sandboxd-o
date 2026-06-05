@@ -47,6 +47,7 @@ func NewRouter(svc *service.Service, cfg config.Config, logger *logging.Logger) 
 		api.GET("/nodes/:id/sandboxes/:sandboxId", h.NodeGetSandbox)
 		api.POST("/nodes/:id/sandboxes", h.NodeCreateSandbox)
 		api.DELETE("/nodes/:id/sandboxes/:sandboxId", h.NodeDeleteSandbox)
+		api.GET("/nodes/:id/sandboxes/:sandboxId/logs", h.NodeSandboxLogs)
 		api.GET("/nodes/:id/sandboxes/:sandboxId/containers/:container/logs", h.NodeContainerLogs)
 		api.POST("/nodes/:id/reconcile", h.NodeReconcile)
 	}
