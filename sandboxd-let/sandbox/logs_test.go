@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -26,6 +27,73 @@ func testLogService(t *testing.T) (*Service, string) {
 	}
 
 	return s, dir
+}
+
+func withLogLimits(t *testing.T, fileBytes, sandboxBytes int64) {
+	t.Helper()
+
+	oldFileBytes := maxLogFileBytes
+	oldSandboxBytes := maxSandboxLogBytes
+	maxLogFileBytes = fileBytes
+	maxSandboxLogBytes = sandboxBytes
+	t.Cleanup(func() {
+		maxLogFileBytes = oldFileBytes
+		maxSandboxLogBytes = oldSandboxBytes
+	})
+}
+
+func TestGetContainerLogsReturnsFullFile(t *testing.T) {
+	s, dir := testLogService(t)
+
+	logDir := filepath.Join(dir, "s1", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(logDir, "app.log"), []byte("line1\nline2\r\npartial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	logs, err := s.GetContainerLogs(context.Background(), "s1", "app")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"line1", "line2", "partial"}
+	if len(logs.Lines) != len(want) {
+		t.Fatalf("lines=%v want=%v", logs.Lines, want)
+	}
+	for i := range want {
+		if logs.Lines[i] != want[i] {
+			t.Fatalf("lines=%v want=%v", logs.Lines, want)
+		}
+	}
+}
+
+func TestGetContainerLogsRejectsInvalidContainerName(t *testing.T) {
+	s, _ := testLogService(t)
+	if _, err := s.GetContainerLogs(context.Background(), "s1", "../app"); err == nil {
+		t.Fatal("expected invalid container name error")
+	}
+}
+
+func TestGetContainerLogsRejectsLargeFile(t *testing.T) {
+	withLogLimits(t, 8, 1024)
+	s, dir := testLogService(t)
+
+	logDir := filepath.Join(dir, "s1", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(logDir, "app.log"), []byte("012345678\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := s.GetContainerLogs(context.Background(), "s1", "app")
+	if !errors.Is(err, ErrLogTooLarge) {
+		t.Fatalf("err=%v want ErrLogTooLarge", err)
+	}
 }
 
 func TestGetSandboxLogsPrefixesAcrossContainers(t *testing.T) {
@@ -69,6 +137,40 @@ func TestGetSandboxLogsPrefixesAcrossContainers(t *testing.T) {
 		if logs.Lines[i] != want[i] {
 			t.Fatalf("lines=%v want=%v", logs.Lines, want)
 		}
+	}
+}
+
+func TestGetSandboxLogsRejectsLargeAggregate(t *testing.T) {
+	withLogLimits(t, 1024, 16)
+	s, dir := testLogService(t)
+
+	sb := &model.Sandbox{
+		ID: "s1",
+		Containers: map[string]model.ContainerState{
+			"app": {Name: "app"},
+			"db":  {Name: "db"},
+		},
+	}
+	if err := s.store.Save(sb); err != nil {
+		t.Fatal(err)
+	}
+
+	logDir := filepath.Join(dir, "s1", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(logDir, "app.log"), []byte("12345678\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(logDir, "db.log"), []byte("abcdefghi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := s.GetSandboxLogs(context.Background(), "s1")
+	if !errors.Is(err, ErrLogTooLarge) {
+		t.Fatalf("err=%v want ErrLogTooLarge", err)
 	}
 }
 

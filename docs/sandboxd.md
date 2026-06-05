@@ -373,6 +373,7 @@ Base URL: `http://localhost:8080`
 - Success: `200 OK`
 - Failure:
     - `404 Not Found` (sandbox does not exist)
+    - `413 Payload Too Large` (log file or aggregate sandbox logs exceed the read limit)
     - `500 Internal Server Error` (log file read I/O failure)
 
 Note:

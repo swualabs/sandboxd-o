@@ -264,6 +264,7 @@ func (s *Server) reconcile(c *gin.Context) {
 // @Param name path string true "Container name"
 // @Success 200 {object} ContainerLogsResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 413 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /v1/sandboxes/{id}/containers/{name}/logs [get]
 func (s *Server) getContainerLogs(c *gin.Context) {
@@ -289,6 +290,11 @@ func (s *Server) getContainerLogs(c *gin.Context) {
 			return
 		}
 
+		if errors.Is(err, sandbox.ErrLogTooLarge) {
+			respondErrorMessage(c, http.StatusRequestEntityTooLarge, "logs too large")
+			return
+		}
+
 		respondErrorMessage(c, http.StatusInternalServerError, "failed to read logs")
 		return
 	}
@@ -304,6 +310,7 @@ func (s *Server) getContainerLogs(c *gin.Context) {
 // @Param id path string true "Sandbox ID"
 // @Success 200 {object} SandboxLogsResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 413 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /v1/sandboxes/{id}/logs [get]
 func (s *Server) getSandboxLogs(c *gin.Context) {
@@ -312,6 +319,11 @@ func (s *Server) getSandboxLogs(c *gin.Context) {
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			respondErrorMessage(c, http.StatusNotFound, "logs not found")
+			return
+		}
+
+		if errors.Is(err, sandbox.ErrLogTooLarge) {
+			respondErrorMessage(c, http.StatusRequestEntityTooLarge, "logs too large")
 			return
 		}
 

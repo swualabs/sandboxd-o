@@ -15,6 +15,13 @@ import (
 	"sandboxd-o/sandboxd-let/model"
 )
 
+var ErrLogTooLarge = errors.New("log too large")
+
+var (
+	maxLogFileBytes    int64 = 32 << 20
+	maxSandboxLogBytes int64 = 128 << 20
+)
+
 type Logs struct {
 	Lines []string `json:"lines"`
 }
@@ -68,7 +75,7 @@ func (s *Service) GetContainerLogs(_ context.Context, sandboxID, containerName s
 		return nil, err
 	}
 
-	lines, err := readLogLines(path, "")
+	lines, err := readLogLines(path, "", maxLogFileBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -101,10 +108,29 @@ func (s *Service) GetSandboxLogs(_ context.Context, sandboxID string) (*Logs, er
 
 	entries := []logEntry{}
 	seq := 0
+	totalBytes := int64(0)
 	for containerIndex, name := range names {
 		path, err := s.containerLogPath(sandboxID, name)
 		if err != nil {
 			return nil, err
+		}
+
+		size, err := logFileSize(path)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+
+			return nil, err
+		}
+
+		if size > maxLogFileBytes {
+			return nil, ErrLogTooLarge
+		}
+
+		totalBytes += size
+		if totalBytes > maxSandboxLogBytes {
+			return nil, ErrLogTooLarge
 		}
 
 		containerEntries, err := readLogEntries(path, "["+name+"] ", containerIndex, &seq)
@@ -148,7 +174,29 @@ func (s *Service) GetSandboxLogs(_ context.Context, sandboxID string) (*Logs, er
 	return &Logs{Lines: lines}, nil
 }
 
-func readLogLines(path, prefix string) ([]string, error) {
+func logFileSize(path string) (int64, error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+
+	if st.Size() > maxLogFileBytes {
+		return st.Size(), ErrLogTooLarge
+	}
+
+	return st.Size(), nil
+}
+
+func readLogLines(path, prefix string, maxBytes int64) ([]string, error) {
+	size, err := logFileSize(path)
+	if err != nil {
+		return nil, err
+	}
+
+	if size > maxBytes {
+		return nil, ErrLogTooLarge
+	}
+
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -174,6 +222,10 @@ func readLogLines(path, prefix string) ([]string, error) {
 }
 
 func readLogEntries(path, prefix string, containerIndex int, seq *int) ([]logEntry, error) {
+	if _, err := logFileSize(path); err != nil {
+		return nil, err
+	}
+
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err

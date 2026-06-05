@@ -431,5 +431,11 @@ func printNewLogLines(w io.Writer, lines []string, printed map[string]int) error
 		printed[line] = count
 	}
 
+	for line := range printed {
+		if _, ok := seen[line]; !ok {
+			delete(printed, line)
+		}
+	}
+
 	return nil
 }
