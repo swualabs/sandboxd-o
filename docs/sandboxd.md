@@ -367,34 +367,32 @@ Base URL: `http://localhost:8080`
 }
 ```
 
-### Container Logs (Cursor Pagination)
+### Sandbox Logs
 
-- `GET /v1/sandboxes/{id}/containers/{name}/logs?cursor=<byte_offset>&limit=<line_count>`
-- Default `limit`: `100`
-- Max `limit`: `1000`
+- `GET /v1/sandboxes/{id}/logs`
 - Success: `200 OK`
 - Failure:
-    - `404 Not Found` (sandbox/container does not exist and log file is missing)
-    - `400 Bad Request` (invalid cursor/limit)
+    - `404 Not Found` (sandbox does not exist)
+    - `413 Payload Too Large` (log file or aggregate sandbox logs exceed the read limit)
     - `500 Internal Server Error` (log file read I/O failure)
 
 Note:
 
-- If the container exists but the log file is not created yet, the API returns `200` with `lines: []`.
+- Each line is prefixed with the container name, for example `[app] ...`.
+- CRI-formatted log lines are sorted by their timestamp across containers.
+- If a container log file is not created yet, it is skipped.
+- The older `GET /v1/sandboxes/{id}/containers/{name}/logs` endpoint remains available for per-container compatibility.
 
 **Response**
 
 ```json
 {
     "sandbox_id": "sbx-http-demo",
-    "container": "web",
     "logs": {
         "lines": [
-            "Serving HTTP on 0.0.0.0 port 8080 (http://0.0.0.0:8080/) ...",
-            "10.0.0.5 - - [08/May/2026 11:03:02] \"GET / HTTP/1.1\" 200 -"
-        ],
-        "next_cursor": "154",
-        "has_more": false
+            "[app] Serving HTTP on 0.0.0.0 port 8080 (http://0.0.0.0:8080/) ...",
+            "[db] database system is ready to accept connections"
+        ]
     }
 }
 ```

@@ -708,14 +708,6 @@ paths:
         name: container
         required: true
         type: string
-      - description: Cursor offset
-        in: query
-        name: cursor
-        type: string
-      - description: Line limit
-        in: query
-        name: limit
-        type: integer
       produces:
       - application/json
       responses:
@@ -732,6 +724,38 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Proxy container logs
+      tags:
+      - orchestrator-proxy
+  /api/v1/nodes/{id}/sandboxes/{sandboxId}/logs:
+    get:
+      description: Proxies sandbox logs request to selected node sandboxd.
+      parameters:
+      - description: Node id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Sandbox ID
+        in: path
+        name: sandboxId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ProxyResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Proxy sandbox logs
       tags:
       - orchestrator-proxy
   /api/v1/sandboxes:

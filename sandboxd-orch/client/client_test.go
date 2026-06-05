@@ -120,7 +120,11 @@ func TestClient_SandboxOps(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := c.GetContainerLogs(ctx, "s1", "c", "10", 100); err != nil {
+	if _, err := c.GetContainerLogs(ctx, "s1", "c"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := c.GetSandboxLogs(ctx, "s1"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -131,6 +135,29 @@ func TestClient_SandboxOps(t *testing.T) {
 
 	if len(st.Items) != 1 || st.Items[0].ID != "s1" {
 		t.Fatalf("unexpected sandbox statuses: %+v", st)
+	}
+}
+
+func TestClient_GetSandboxLogsBuildsPathWithoutQuery(t *testing.T) {
+	var gotPath, gotQuery string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		gotQuery = r.URL.RawQuery
+		_ = json.NewEncoder(w).Encode(map[string]any{"logs": map[string]any{"lines": []string{"[app] x"}}})
+	}))
+	defer ts.Close()
+
+	c := New(ts.URL, time.Second)
+	if _, err := c.GetSandboxLogs(context.Background(), "s/1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if gotPath != "/v1/sandboxes/s%2F1/logs" {
+		t.Fatalf("path=%q", gotPath)
+	}
+
+	if gotQuery != "" {
+		t.Fatalf("query=%q", gotQuery)
 	}
 }
 

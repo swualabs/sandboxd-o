@@ -100,6 +100,22 @@ func toString(v any) string {
 	return fmt.Sprintf("%v", v)
 }
 
+func extractLogLines(v map[string]any) []string {
+	logs, _ := v["logs"].(map[string]any)
+	switch rawLines := logs["lines"].(type) {
+	case []string:
+		return append([]string(nil), rawLines...)
+	case []any:
+		lines := make([]string, 0, len(rawLines))
+		for _, line := range rawLines {
+			lines = append(lines, toString(line))
+		}
+		return lines
+	default:
+		return nil
+	}
+}
+
 func extractSandboxRows(items any) []map[string]string {
 	arr, ok := items.([]any)
 	if !ok {

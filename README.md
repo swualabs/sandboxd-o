@@ -217,12 +217,12 @@ Available Commands:
   delete      Delete resource
   get         Get resources
   help        Help about any command
-  logs        Get container logs via orchestrator node proxy
+  logs        Get sandbox logs via orchestrator node proxy
   spec        Print resource in YAML spec form
 
 Flags:
   -h, --help               help for sbxctl
-      --limit int          log/list limit (default 100)
+      --limit int          list limit (default 100)
       --node string        node id for proxy APIs
   -o, --output string      output format: json|yaml|wide
       --server string      orchestrator base url (or SBXCTL_SERVER)
@@ -235,14 +235,14 @@ The main available options are as follows:
 
 - `--server`: Specifies the base URL of the API server. This option can also be configured through the `SBXCTL_SERVER` environment variable. For example: `http://localhost:8080`
 - `--node`: Specifies the target node ID when using the Proxied API. This allows API requests to be sent directly to a specific sbxlet instance. For example: `sandboxd-node-1`
-- `-o, --output`: Specifies the output format. Available options are `json`, `yaml`, and `wide`. Table output is used by default.
+- `-o, --output`: Specifies the output format. Available options are `json`, `yaml`, and `wide`. Table output is used by default. The `logs` command always prints raw log lines.
 
 The main available commands are as follows:
 
 - `get`: Used to retrieve a list of resources or inspect detailed information for a specific resource. Resource types may be referenced using either their full names (`nodes`, `external`, `sandboxes`) or shorthand forms (`n`, `e`, `s`). Detailed inspection of a resource can be performed using `/` separators.
 - `create`: Used to create resources from a YAML file. For example: `sbxctl create -f examples/node.yaml`
 - `delete`: Used to delete resources. For example: `sbxctl delete node/sandboxd-node-1`. A specific resource must be explicitly specified.
-- `logs`: Used to retrieve logs from containers inside a sandbox. For example: `sbxctl logs s/sbx-wordpress-demo wordpress`. Internally, this command uses sbxorch's Proxied API to send requests directly to the sbxlet instance running on the target node and retrieve logs.
+- `logs`: Used to retrieve sandbox-level logs with each line prefixed by the container name. For example: `sbxctl logs s/sbx-wordpress-demo` returns lines such as `[app] ...` and `[db] ...`. For backward compatibility, `sbxctl logs s/sbx-wordpress-demo app` still retrieves only the `app` container logs. Use `sbxctl logs s/sbx-wordpress-demo --watch` to poll logs and print newly added lines. Internally, this command uses sbxorch's Proxied API to send requests directly to the sbxlet instance running on the target node and retrieve logs.
 
 # Resource Model / Objects
 

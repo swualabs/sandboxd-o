@@ -24,6 +24,7 @@ func newRouter(s *Server) *gin.Engine {
 	r.GET("/v1/node/status", s.nodeStatus)
 	r.GET("/v1/sandboxes", s.listSandboxes)
 	r.GET("/v1/sandboxes/:id", s.getSandbox)
+	r.GET("/v1/sandboxes/:id/logs", s.getSandboxLogs)
 	r.GET("/v1/sandboxes/:id/containers/:name/logs", s.getContainerLogs)
 	r.POST("/v1/sandboxes/statuses", s.sandboxStatuses)
 	r.POST("/v1/sandboxes", s.createSandbox)

@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
+	"time"
 
 	"sandboxd-o/sandboxd-ctl/manifest"
 
@@ -316,11 +318,12 @@ func newDeleteCommand(opts *Options) *cobra.Command {
 }
 
 func newLogsCommand(opts *Options) *cobra.Command {
+	var watch bool
 	cmd := &cobra.Command{
-		Use:     "logs <resource/name> <container>",
+		Use:     "logs <resource/name> [container]",
 		Aliases: []string{"log", "l"},
-		Short:   "Get container logs via orchestrator node proxy",
-		Args:    cobra.ExactArgs(2),
+		Short:   "Get sandbox logs via orchestrator node proxy",
+		Args:    cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ref, err := parseObjectRef(args[0])
 			if err != nil {
@@ -331,18 +334,13 @@ func newLogsCommand(opts *Options) *cobra.Command {
 				return err
 			}
 
-			container := strings.TrimSpace(args[1])
-			if container == "" {
-				return fmt.Errorf("container name is required")
-			}
-
 			c := mustClient(opts)
-			ctx, cancel := withCtx(opts)
-			defer cancel()
 
 			node := strings.TrimSpace(opts.Node)
 			if node == "" {
+				ctx, cancel := withCtx(opts)
 				obj, err := c.GetSandbox(ctx, ref.Name)
+				cancel()
 				if err != nil {
 					return fmt.Errorf("resolve node from sandbox status: %w", err)
 				}
@@ -355,13 +353,89 @@ func newLogsCommand(opts *Options) *cobra.Command {
 				}
 			}
 
-			out, err := c.NodeContainerLogs(ctx, node, ref.Name, container, opts.Limit)
-			if err != nil {
-				return err
+			fetch := func() (map[string]any, error) {
+				ctx, cancel := withCtx(opts)
+				defer cancel()
+
+				if len(args) == 2 {
+					container := strings.TrimSpace(args[1])
+					if container == "" {
+						return nil, fmt.Errorf("container name is required")
+					}
+
+					return c.NodeContainerLogs(ctx, node, ref.Name, container)
+				}
+
+				return c.NodeSandboxLogs(ctx, node, ref.Name)
 			}
 
-			return printAny(cmd.OutOrStdout(), out, opts.Output)
+			if !watch {
+				out, err := fetch()
+				if err != nil {
+					return err
+				}
+
+				return printLogLines(cmd.OutOrStdout(), extractLogLines(out))
+			}
+
+			printed := map[string]int{}
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+
+			for {
+				out, err := fetch()
+				if err != nil {
+					return err
+				}
+				if err := printNewLogLines(cmd.OutOrStdout(), extractLogLines(out), printed); err != nil {
+					return err
+				}
+
+				select {
+				case <-cmd.Context().Done():
+					return cmd.Context().Err()
+				case <-ticker.C:
+				}
+			}
 		},
 	}
+	cmd.Flags().BoolVarP(&watch, "watch", "w", false, "watch logs and print newly added lines")
 	return cmd
+}
+
+func printLogLines(w io.Writer, lines []string) error {
+	for _, line := range lines {
+		if _, err := fmt.Fprintln(w, line); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func printNewLogLines(w io.Writer, lines []string, printed map[string]int) error {
+	seen := map[string]int{}
+	toPrint := make([]string, 0)
+	for _, line := range lines {
+		seen[line]++
+		if seen[line] > printed[line] {
+			toPrint = append(toPrint, line)
+		}
+	}
+
+	if err := printLogLines(w, toPrint); err != nil {
+		return err
+	}
+
+	for line, count := range seen {
+		printed[line] = count
+	}
+
+	for line := range printed {
+		if _, ok := seen[line]; !ok {
+			delete(printed, line)
+		}
+	}
+
+	return nil
 }

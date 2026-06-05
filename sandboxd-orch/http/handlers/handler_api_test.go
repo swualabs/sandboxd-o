@@ -36,6 +36,8 @@ func setupHandler(t *testing.T) (*Handler, *service.Service, *httptest.Server) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"deleted": "s1"})
 		case r.URL.Path == "/v1/sandboxes/s1/containers/c1/logs":
 			_ = json.NewEncoder(w).Encode(map[string]any{"logs": map[string]any{"lines": []string{"x"}}})
+		case r.URL.Path == "/v1/sandboxes/s1/logs":
+			_ = json.NewEncoder(w).Encode(map[string]any{"logs": map[string]any{"lines": []string{"[app] x"}}})
 		case r.URL.Path == "/v1/reconcile":
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 		default:
@@ -89,6 +91,7 @@ func TestHandlers_AllEndpoints(t *testing.T) {
 	r.GET("/nodes/:id/sandboxes/:sandboxId", h.NodeGetSandbox)
 	r.POST("/nodes/:id/sandboxes", h.NodeCreateSandbox)
 	r.DELETE("/nodes/:id/sandboxes/:sandboxId", h.NodeDeleteSandbox)
+	r.GET("/nodes/:id/sandboxes/:sandboxId/logs", h.NodeSandboxLogs)
 	r.GET("/nodes/:id/sandboxes/:sandboxId/containers/:container/logs", h.NodeContainerLogs)
 	r.POST("/nodes/:id/reconcile", h.NodeReconcile)
 	r.POST("/sandboxes", h.CreateSandbox)
@@ -142,7 +145,10 @@ func TestHandlers_AllEndpoints(t *testing.T) {
 	must(http.MethodPost, "/nodes/n1/sandboxes", []byte(`{"id":"../../../../tmp/hello","egress":false,"containers":[{"name":"c1","image":"nginx","resource":{"cpu":"100m","memory":"64Mi","ephemeralStorage":"96Mi"}}],"ports":[]}`), 400)
 	must(http.MethodPost, "/nodes/n1/sandboxes", []byte(`{"id":"s1"`), 400)
 	must(http.MethodDelete, "/nodes/n1/sandboxes/s1", nil, 200)
-	must(http.MethodGet, "/nodes/n1/sandboxes/s1/containers/c1/logs?limit=100", nil, 200)
+	must(http.MethodGet, "/nodes/n1/sandboxes/s1/logs", nil, 200)
+	must(http.MethodGet, "/nodes/no/sandboxes/s1/logs", nil, 404)
+	must(http.MethodGet, "/nodes/n1/sandboxes/s1/containers/c1/logs", nil, 200)
+	must(http.MethodGet, "/nodes/no/sandboxes/s1/containers/c1/logs", nil, 404)
 	must(http.MethodPost, "/nodes/n1/reconcile", nil, 200)
 
 	must(http.MethodPost, "/sandboxes", []byte(`{"id":"obj-1","spec":{"egress":true,"containers":[{"name":"app","image":"nginx","resource":{"cpu":"100m","memory":"64Mi","ephemeral_storage":"96Mi"}}]}}`), 201)

@@ -534,18 +534,54 @@ const docTemplateorchestrator = `{
                         "name": "container",
                         "in": "path",
                         "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ProxyResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/nodes/{id}/sandboxes/{sandboxId}/logs": {
+            "get": {
+                "description": "Proxies sandbox logs request to selected node sandboxd.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "orchestrator-proxy"
+                ],
+                "summary": "Proxy sandbox logs",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Node id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
                     },
                     {
                         "type": "string",
-                        "description": "Cursor offset",
-                        "name": "cursor",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "Line limit",
-                        "name": "limit",
-                        "in": "query"
+                        "description": "Sandbox ID",
+                        "name": "sandboxId",
+                        "in": "path",
+                        "required": true
                     }
                 ],
                 "responses": {

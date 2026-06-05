@@ -88,17 +88,18 @@ func (c *Client) NodeCreateSandbox(ctx context.Context, node string, payload map
 	return c.do(ctx, http.MethodPost, "/api/v1/nodes/"+url.PathEscape(node)+"/sandboxes", payload)
 }
 
-func (c *Client) NodeContainerLogs(ctx context.Context, node, sandboxID, container string, limit int) (map[string]any, error) {
+func (c *Client) NodeContainerLogs(ctx context.Context, node, sandboxID, container string) (map[string]any, error) {
 	if strings.TrimSpace(container) == "" {
 		return nil, fmt.Errorf("container name is required")
 	}
 
-	q := ""
-	if limit > 0 {
-		q = "?limit=" + strconv.Itoa(limit)
-	}
+	p := "/api/v1/nodes/" + url.PathEscape(node) + "/sandboxes/" + url.PathEscape(sandboxID) + "/containers/" + url.PathEscape(container) + "/logs"
 
-	p := "/api/v1/nodes/" + url.PathEscape(node) + "/sandboxes/" + url.PathEscape(sandboxID) + "/containers/" + url.PathEscape(container) + "/logs" + q
+	return c.do(ctx, http.MethodGet, p, nil)
+}
+
+func (c *Client) NodeSandboxLogs(ctx context.Context, node, sandboxID string) (map[string]any, error) {
+	p := "/api/v1/nodes/" + url.PathEscape(node) + "/sandboxes/" + url.PathEscape(sandboxID) + "/logs"
 
 	return c.do(ctx, http.MethodGet, p, nil)
 }

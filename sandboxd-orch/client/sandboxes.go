@@ -72,20 +72,12 @@ func (c *Client) SandboxStatuses(ctx context.Context, ids []string) (SandboxStat
 	return resp, nil
 }
 
-func (c *Client) GetContainerLogs(ctx context.Context, sandboxID, containerName, cursor string, limit int) (map[string]any, error) {
-	q := url.Values{}
-	if cursor != "" {
-		q.Set("cursor", cursor)
-	}
-
-	if limit > 0 {
-		q.Set("limit", strconv.Itoa(limit))
-	}
-
+func (c *Client) GetContainerLogs(ctx context.Context, sandboxID, containerName string) (map[string]any, error) {
 	path := "/v1/sandboxes/" + url.PathEscape(sandboxID) + "/containers/" + url.PathEscape(containerName) + "/logs"
-	if qs := q.Encode(); qs != "" {
-		path += "?" + qs
-	}
+	return c.do(ctx, http.MethodGet, path, nil)
+}
 
+func (c *Client) GetSandboxLogs(ctx context.Context, sandboxID string) (map[string]any, error) {
+	path := "/v1/sandboxes/" + url.PathEscape(sandboxID) + "/logs"
 	return c.do(ctx, http.MethodGet, path, nil)
 }

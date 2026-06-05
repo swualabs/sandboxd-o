@@ -287,7 +287,7 @@ const docTemplatesandboxd = `{
         },
         "/v1/sandboxes/{id}/containers/{name}/logs": {
             "get": {
-                "description": "Reads container logs with cursor pagination over byte offsets.",
+                "description": "Reads all container logs.",
                 "produces": [
                     "application/json"
                 ],
@@ -309,18 +309,6 @@ const docTemplatesandboxd = `{
                         "name": "name",
                         "in": "path",
                         "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Cursor offset",
-                        "name": "cursor",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "Max lines (default 100)",
-                        "name": "limit",
-                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -330,14 +318,61 @@ const docTemplatesandboxd = `{
                             "$ref": "#/definitions/httpserver.ContainerLogsResponse"
                         }
                     },
-                    "400": {
-                        "description": "Bad Request",
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/httpserver.ErrorResponse"
                         }
                     },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/httpserver.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/httpserver.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/sandboxes/{id}/logs": {
+            "get": {
+                "description": "Reads all sandbox container logs. Each line is prefixed with the container name and CRI timestamped lines are sorted by time.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sandboxd-logs"
+                ],
+                "summary": "Get sandbox logs",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/httpserver.SandboxLogsResponse"
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/httpserver.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
                         "schema": {
                             "$ref": "#/definitions/httpserver.ErrorResponse"
                         }
@@ -360,7 +395,7 @@ const docTemplatesandboxd = `{
                     "type": "string"
                 },
                 "logs": {
-                    "$ref": "#/definitions/sandbox.LogsPage"
+                    "$ref": "#/definitions/sandbox.Logs"
                 },
                 "sandbox_id": {
                     "type": "string"
@@ -457,6 +492,17 @@ const docTemplatesandboxd = `{
             "properties": {
                 "ok": {
                     "type": "boolean"
+                }
+            }
+        },
+        "httpserver.SandboxLogsResponse": {
+            "type": "object",
+            "properties": {
+                "logs": {
+                    "$ref": "#/definitions/sandbox.Logs"
+                },
+                "sandbox_id": {
+                    "type": "string"
                 }
             }
         },
@@ -755,20 +801,14 @@ const docTemplatesandboxd = `{
                 }
             }
         },
-        "sandbox.LogsPage": {
+        "sandbox.Logs": {
             "type": "object",
             "properties": {
-                "has_more": {
-                    "type": "boolean"
-                },
                 "lines": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
-                },
-                "next_cursor": {
-                    "type": "string"
                 }
             }
         }

@@ -65,7 +65,12 @@ type ReconcileResponse struct {
 }
 
 type ContainerLogsResponse struct {
-	SandboxID string            `json:"sandbox_id"`
-	Container string            `json:"container"`
-	Logs      *sandbox.LogsPage `json:"logs"`
+	SandboxID string        `json:"sandbox_id"`
+	Container string        `json:"container"`
+	Logs      *sandbox.Logs `json:"logs"`
+}
+
+type SandboxLogsResponse struct {
+	SandboxID string        `json:"sandbox_id"`
+	Logs      *sandbox.Logs `json:"logs"`
 }

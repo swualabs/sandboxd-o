@@ -518,28 +518,23 @@ Create sandbox directly on selected node (sbxlet API pass-through).
 }
 ```
 
-### GET /api/v1/nodes/{name}/sandboxes/{id}/containers/{container}/logs
-
-Query params:
-
-- `cursor` (optional)
-- `limit` (optional, default `100`)
+### GET /api/v1/nodes/{name}/sandboxes/{id}/logs
 
 - Success: `200 OK`
+- CRI-formatted log lines are returned sorted by timestamp across containers.
 
 **Response Example**
 
 ```json
 {
     "sandbox_id": "sbx-demo-1",
-    "container": "web",
     "logs": {
-        "lines": ["line1", "line2"],
-        "next_cursor": "1234",
-        "has_more": false
+        "lines": ["[app] line1", "[db] line2"]
     }
 }
 ```
+
+The older `/api/v1/nodes/{name}/sandboxes/{id}/containers/{container}/logs` proxy remains available for per-container compatibility.
 
 ### POST /api/v1/nodes/{id}/reconcile
 
