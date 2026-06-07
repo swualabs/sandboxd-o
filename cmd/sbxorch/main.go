@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"log/slog"
 	nethttp "net/http"
@@ -24,7 +25,16 @@ import (
 // @schemes http
 
 func main() {
-	cfg, err := config.Load()
+	configPath := config.DefaultConfigPath
+	configPathShort := ""
+	flag.StringVar(&configPath, "config", config.DefaultConfigPath, "path to sbxorch config json")
+	flag.StringVar(&configPathShort, "c", "", "shorthand for --config")
+	flag.Parse()
+	if strings.TrimSpace(configPathShort) != "" {
+		configPath = configPathShort
+	}
+
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		boot := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 		boot.Error("orchestrator config error", slog.Any("error", err))
@@ -32,9 +42,9 @@ func main() {
 	}
 
 	logger, err := logging.New(logging.Config{
-		Dir:        strings.TrimSpace(os.Getenv("ORCH_LOG_DIR")),
-		FilePrefix: valueOrDefault(strings.TrimSpace(os.Getenv("ORCH_LOG_FILE_PREFIX")), "orchestrator"),
-	}, logging.Options{Service: "orchestrator", Env: strings.TrimSpace(os.Getenv("APP_ENV")), AddSource: false, Level: slog.LevelInfo})
+		Dir:        cfg.LogDir,
+		FilePrefix: valueOrDefault(cfg.LogFilePrefix, "orchestrator"),
+	}, logging.Options{Service: "orchestrator", Env: strings.TrimSpace(cfg.AppEnv), AddSource: false, Level: slog.LevelInfo})
 	if err != nil {
 		boot := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 		boot.Error("orchestrator logging init error", slog.Any("error", err))

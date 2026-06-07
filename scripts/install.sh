@@ -214,46 +214,39 @@ JSON
   sudo iptables -C INPUT -j SANDBOX-IN 2>/dev/null || sudo iptables -I INPUT 1 -j SANDBOX-IN
 }
 
-write_runtime_env() {
-  log "Writing runtime settings to .env"
+write_runtime_config() {
+  log "Writing runtime settings to /var/lib/sandboxd/sbxlet_config.json"
   local runtime_addr="/run/containerd/containerd.sock"
-  if [[ -f .env ]]; then
-    if grep -q '^SANDBOX_CONTAINERD_ADDRESS=' .env; then
-      sed -i "s|^SANDBOX_CONTAINERD_ADDRESS=.*|SANDBOX_CONTAINERD_ADDRESS=${runtime_addr}|" .env
-    else
-      echo "SANDBOX_CONTAINERD_ADDRESS=${runtime_addr}" >> .env
-    fi
-    if grep -q '^SANDBOX_CNI_CONF_PATH=' .env; then
-      sed -i "s|^SANDBOX_CNI_CONF_PATH=.*|SANDBOX_CNI_CONF_PATH=${SBX_CNI_CONF_FILE}|" .env
-    else
-      echo "SANDBOX_CNI_CONF_PATH=${SBX_CNI_CONF_FILE}" >> .env
-    fi
-    sed -i '/^SANDBOX_RUNTIME_PROFILE=/d' .env
-    sed -i '/^SANDBOX_SNAPSHOTTER=/d' .env
-    if grep -q '^SANDBOX_DEFAULT_EPHEMERAL_STORAGE=' .env; then
-      sed -i 's|^SANDBOX_DEFAULT_EPHEMERAL_STORAGE=.*|SANDBOX_DEFAULT_EPHEMERAL_STORAGE=128Mi|' .env
-    else
-      echo "SANDBOX_DEFAULT_EPHEMERAL_STORAGE=128Mi" >> .env
-    fi
-    if grep -q '^SANDBOX_EPHEMERAL_ROOTFS_PERCENT=' .env; then
-      sed -i 's|^SANDBOX_EPHEMERAL_ROOTFS_PERCENT=.*|SANDBOX_EPHEMERAL_ROOTFS_PERCENT=80|' .env
-    else
-      echo "SANDBOX_EPHEMERAL_ROOTFS_PERCENT=80" >> .env
-    fi
-    if grep -q '^SANDBOX_EPHEMERAL_TMP_PERCENT=' .env; then
-      sed -i 's|^SANDBOX_EPHEMERAL_TMP_PERCENT=.*|SANDBOX_EPHEMERAL_TMP_PERCENT=20|' .env
-    else
-      echo "SANDBOX_EPHEMERAL_TMP_PERCENT=20" >> .env
-    fi
+  local config_path="/var/lib/sandboxd/sbxlet_config.json"
+  local tmp_path
+
+  sudo mkdir -p /var/lib/sandboxd
+  tmp_path="$(mktemp)"
+
+  if [[ -f "${config_path}" ]]; then
+    jq \
+      --arg runtime_addr "${runtime_addr}" \
+      --arg cni_conf_path "${SBX_CNI_CONF_FILE}" \
+      '.containerd_address = $runtime_addr
+      | .cni_conf_path = $cni_conf_path
+      | .default_ephemeral_storage = "128Mi"
+      | .rootfs_ratio_percent = 80
+      | .tmpfs_ratio_percent = 20' \
+      "${config_path}" > "${tmp_path}"
   else
-    cat > .env <<ENV
-SANDBOX_CONTAINERD_ADDRESS=${runtime_addr}
-SANDBOX_CNI_CONF_PATH=${SBX_CNI_CONF_FILE}
-SANDBOX_DEFAULT_EPHEMERAL_STORAGE=128Mi
-SANDBOX_EPHEMERAL_ROOTFS_PERCENT=80
-SANDBOX_EPHEMERAL_TMP_PERCENT=20
-ENV
+    cat > "${tmp_path}" <<EOF
+{
+  "containerd_address": "${runtime_addr}",
+  "cni_conf_path": "${SBX_CNI_CONF_FILE}",
+  "default_ephemeral_storage": "128Mi",
+  "rootfs_ratio_percent": 80,
+  "tmpfs_ratio_percent": 20
+}
+EOF
   fi
+
+  sudo install -m 0644 "${tmp_path}" "${config_path}"
+  rm -f "${tmp_path}"
 }
 
 main() {
@@ -265,7 +258,7 @@ main() {
   install_runsc
   configure_containerd_for_runsc
   configure_network
-  write_runtime_env
+  write_runtime_config
 
   log "Install complete"
   containerd --version

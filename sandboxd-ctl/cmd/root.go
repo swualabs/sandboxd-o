@@ -3,21 +3,22 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"sandboxd-o/sandboxd-ctl/client"
+	cfgfile "sandboxd-o/sandboxd-ctl/config"
 
 	"github.com/spf13/cobra"
 )
 
 type Options struct {
-	Server  string
-	Node    string
-	Timeout time.Duration
-	Output  string
-	Limit   int
+	ConfigPath string
+	Server     string
+	Node       string
+	Timeout    time.Duration
+	Output     string
+	Limit      int
 }
 
 func NewRoot() *cobra.Command {
@@ -29,27 +30,45 @@ func NewRoot() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(opts.Server) == "" {
-				opts.Server = strings.TrimSpace(os.Getenv("SBXCTL_SERVER"))
+			cfg, err := cfgfile.Load(opts.ConfigPath)
+			if err != nil {
+				return err
+			}
+
+			if !cmd.Flags().Changed("server") && strings.TrimSpace(opts.Server) == "" {
+				opts.Server = cfg.Server
+			}
+
+			if !cmd.Flags().Changed("timeout") && opts.Timeout == 10*time.Second {
+				opts.Timeout = cfg.Timeout
+			}
+
+			if !cmd.Flags().Changed("output") && strings.TrimSpace(opts.Output) == "" {
+				opts.Output = cfg.Output
+			}
+
+			if !cmd.Flags().Changed("limit") && opts.Limit == 100 {
+				opts.Limit = cfg.Limit
 			}
 
 			if strings.TrimSpace(opts.Server) == "" {
-				opts.Server = "http://127.0.0.1:8082"
+				opts.Server = cfgfile.DefaultConfig().Server
 			}
 
 			if opts.Timeout <= 0 {
-				opts.Timeout = 10 * time.Second
+				opts.Timeout = cfgfile.DefaultConfig().Timeout
 			}
 
 			if opts.Limit <= 0 {
-				opts.Limit = 100
+				opts.Limit = cfgfile.DefaultConfig().Limit
 			}
 
 			return nil
 		},
 	}
 
-	cmd.PersistentFlags().StringVar(&opts.Server, "server", "", "orchestrator base url (or SBXCTL_SERVER)")
+	cmd.PersistentFlags().StringVarP(&opts.ConfigPath, "config", "c", cfgfile.DefaultConfigPath, "path to sbxctl config json")
+	cmd.PersistentFlags().StringVar(&opts.Server, "server", "", "orchestrator base url (config file or SBXCTL_SERVER)")
 	cmd.PersistentFlags().StringVar(&opts.Node, "node", "", "node id for proxy APIs")
 	cmd.PersistentFlags().DurationVar(&opts.Timeout, "timeout", 10*time.Second, "request timeout")
 	cmd.PersistentFlags().StringVarP(&opts.Output, "output", "o", "", "output format: json|yaml|wide")

@@ -1,0 +1,6 @@
+{
+    "server": "http://10.10.0.1:8082",
+    "timeout": "10s",
+    "output": "",
+    "limit": 100
+}

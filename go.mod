@@ -6,7 +6,6 @@ require (
 	github.com/containerd/containerd/v2 v2.2.2
 	github.com/coreos/go-iptables v0.8.0
 	github.com/gin-gonic/gin v1.12.0
-	github.com/joho/godotenv v1.5.1
 	github.com/spf13/cobra v1.9.1
 	github.com/swaggo/files v1.0.1
 	github.com/swaggo/gin-swagger v1.6.1

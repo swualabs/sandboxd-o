@@ -41,7 +41,7 @@
     - [Requirements](#requirements)
     - [Installation Runtime Dependencies](#installation-runtime-dependencies)
     - [Build and Usage](#build-and-usage)
-- [Environment Variables](#environment-variables)
+- [Configuration](#configuration)
 - [Testing](#testing)
 - [Appendix A. Performance and Benchmarking](#appendix-a-performance-and-benchmarking)
     - [Client Baseline](#client-baseline)
@@ -221,11 +221,12 @@ Available Commands:
   spec        Print resource in YAML spec form
 
 Flags:
+  -c, --config string     path to sbxctl config json (default "/var/lib/sandboxd/sbxctl_config.json")
   -h, --help               help for sbxctl
       --limit int          list limit (default 100)
       --node string        node id for proxy APIs
   -o, --output string      output format: json|yaml|wide
-      --server string      orchestrator base url (or SBXCTL_SERVER)
+      --server string      orchestrator base url (config file or SBXCTL_SERVER)
       --timeout duration   request timeout (default 10s)
 
 Use "sbxctl [command] --help" for more information about a command.
@@ -233,7 +234,8 @@ Use "sbxctl [command] --help" for more information about a command.
 
 The main available options are as follows:
 
-- `--server`: Specifies the base URL of the API server. This option can also be configured through the `SBXCTL_SERVER` environment variable. For example: `http://localhost:8080`
+- `-c, --config`: Specifies the path to the sbxctl JSON configuration file. Default: `/var/lib/sandboxd/sbxctl_config.json`
+- `--server`: Specifies the base URL of the API server. This option can also be configured through the config file or the `SBXCTL_SERVER` environment variable. For example: `http://localhost:8080`
 - `--node`: Specifies the target node ID when using the Proxied API. This allows API requests to be sent directly to a specific sbxlet instance. For example: `sandboxd-node-1`
 - `-o, --output`: Specifies the output format. Available options are `json`, `yaml`, and `wide`. Table output is used by default. The `logs` command always prints raw log lines.
 
@@ -676,9 +678,6 @@ The following example demonstrates how to clone the source code via git and buil
 git clone https://github.com/swualabs/sandboxd-o.git
 cd sandboxd-o
 
-cp .env.example .env
-# vi .env
-
 make build
 ```
 
@@ -686,104 +685,55 @@ After building, the `sbxlet`, `sbxorch`, and `sbxctl` binaries will be generated
 
 You can start sbxlet and sbxorch by executing these binaries with sudo privileges.
 
-The following script demonstrates one example of running sbxlet and sbxorch in the background. (Since log files are stored under `/logs/sbxlet` and `/logs/sbxorch` respectively, it is safe to redirect the binaries' stdout/stderr to `/dev/null`.)
+The following script demonstrates one example of running sbxlet and sbxorch in the background.
 
 ```shell
+sudo install -d /var/lib/sandboxd
+sudo cp configs/sbxlet_config.json /var/lib/sandboxd/sbxlet_config.json
+sudo cp configs/sbxorch_config.json /var/lib/sandboxd/sbxorch_config.json
+
 sudo ./build/sbxlet > /dev/null 2>&1 &
 sudo ./build/sbxorch > /dev/null 2>&1 &
 ```
 
 More detailed installation and usage guides will be provided in the future.
 
-# Environment Variables
+# Configuration
 
-Currently, the environment variables used by sbxlet, sbxorch, and sbxctl are consolidated into `.env.example` within the codebase, but the environment variables themselves are not shared across components.
+`sbxlet`, `sbxorch`, and `sbxctl` now use JSON config files by default.
+
+- `sbxlet`: `/var/lib/sandboxd/sbxlet_config.json`
+- `sbxorch`: `/var/lib/sandboxd/sbxorch_config.json`
+- `sbxctl`: `/var/lib/sandboxd/sbxctl_config.json`
+
+Each binary also accepts `--config` or `-c` to use a different path.
+
+Environment variables are still supported as compatibility overrides, but they are no longer the recommended configuration mechanism.
 
 ## sbxlet
 
-```ini
-# Common
-APP_ENV=dev # application environment, can be set to dev, staging, or prod for different logging levels and configurations
+Example file: [`configs/sbxlet_config.json`](./configs/sbxlet_config.json)
 
-# HTTP listen address for sandboxd
-HTTP_ADDR=:8081
-
-# containerd socket
-SANDBOX_CONTAINERD_ADDRESS=/run/containerd/containerd.sock # default containerd socket path, can be changed if using a custom containerd setup
-SANDBOX_RUNTIME_BINARY=runsc # gVisor runtime binary, default is runsc, can be changed if using a custom built gVisor runtime
-SANDBOX_CNI_CONF_PATH=/etc/cni/sandboxd.d/20-sbxnet.conflist # CNI configuration file path, can be changed if using a custom CNI setup
-SANDBOX_LOG_DIR=/logs/sbxlet # log directory for sbxlet, default is /logs/sbxlet
-SANDBOX_LOG_FILE_PREFIX=sandboxd # log file prefix for sbxlet, default is sandboxd
-
-# local state/lock directories
-SANDBOX_STATE_BASE_DIR=/var/lib/sandboxd/sandboxes # base directory for sandbox state files, default is /var/lib/sandboxd/sandboxes
-SANDBOX_LOCK_DIR=/var/lib/sandboxd/locks # directory for lock files, default is /var/lib/sandboxd/locks
-
-# sandbox bridge/subnet
-SANDBOX_BRIDGE_INTERFACE=sbx-br0 # bridge interface name for sandbox networking, default is sbx-br0
-SANDBOX_SUBNET_CIDR=10.89.0.0/16 # subnet CIDR for sandbox networking, default is 10.89.0.0/16
-SANDBOX_MAX_ALLOC_PERCENT=90 # maximum percentage of node resources that can be allocated to sandboxes, default is 90% (ex. if node has 4 vCPUs and 8GB memory, up to 3.6 vCPUs and 7.2GB memory can be allocated to sandboxes)
-SANDBOX_PROVISION_TIMEOUT=4m # timeout for provisioning a sandbox, including image pulling and container creation, default is 4 minutes
-SANDBOX_CONTAINER_CREATE_TIMEOUT=2m # timeout for creating a container, default is 2 minutes
-SANDBOX_IMAGE_PULL_TIMEOUT=8m # timeout for pulling an image, default is 8 minutes
-SANDBOX_DEFAULT_EPHEMERAL_STORAGE=128Mi # default per-container writable storage budget if ephemeral_storage is omitted
-SANDBOX_EPHEMERAL_ROOTFS_PERCENT=80 # split ratio for root writable layer (/), must satisfy rootfs+tmp=100
-SANDBOX_EPHEMERAL_TMP_PERCENT=20 # split ratio for /tmp, must satisfy rootfs+tmp=100
-
-# Chains to hook SANDBOX-FWD jump (comma-separated)
-SANDBOX_FORWARD_HOOK_CHAINS=FORWARD,DOCKER-USER # default chains to hook iptables rules for sandbox port forwarding, can be customized as needed
+```shell
+sudo ./build/sbxlet --config /var/lib/sandboxd/sbxlet_config.json
 ```
 
 ## sbxorch
 
-```ini
-# Common
-APP_ENV=dev # application environment, can be set to dev, staging, or prod for different logging levels and configurations
+Example file: [`configs/sbxorch_config.json`](./configs/sbxorch_config.json)
 
-# Http listen address for sbxorch
-ORCH_HTTP_ADDR=:8082
-
-# Paths and files
-ORCH_CONFIG_PATH=configs/apiserver.yaml # path to the orchestrator configuration file, default is configs/apiserver.yaml
-ORCH_SQLITE_PATH=/var/lib/sandboxd/orchestrator.db # path to the SQLite database file, default is /var/lib/sandboxd/orchestrator.db
-ORCH_LOG_DIR=/logs/sbxorch # log directory for sbxorch, default is /logs/sbxorch
-ORCH_LOG_FILE_PREFIX=orchestrator # log file prefix for sbxorch, default is orchestrator
-
-# Heartbeat / node state
-ORCH_HEARTBEAT_INTERVAL=10s # interval for sending heartbeat signals to nodes, default is 10 seconds
-ORCH_NODE_PROBE_TIMEOUT=3s # timeout for probing node status during heartbeat, default is 3 seconds
-ORCH_SANDBOX_OP_TIMEOUT=60s # timeout for sandbox operations such as creation and deletion, default is 60 seconds
-ORCH_HEARTBEAT_PARALLEL=false # whether to perform heartbeat probes in parallel, default is false (sequential)
-ORCH_HEARTBEAT_MAX_PARALLEL=4 # maximum number of parallel heartbeat probes when ORCH_HEARTBEAT_PARALLEL is true, default is 4
-ORCH_READY_SUCCESS_THRESHOLD=2 # number of consecutive successful heartbeats required for a node to be considered Ready, default is 2
-ORCH_NOTREADY_FAILURE_THRESHOLD=2 # number of consecutive failed heartbeats required for a node to be considered NotReady, default is 2
-
-# Resource sync / persistence
-ORCH_RESOURCE_SYNC_INTERVAL=30s # interval for syncing node resources from sbxlet, default is 30 seconds
-ORCH_RESOURCE_PERSIST_MIN_INTERVAL=30s # minimum interval for persisting resource state to the database, default is 30 seconds
-ORCH_RESOURCE_PERSIST_MAX_INTERVAL=5m # maximum interval for persisting resource state to the database, default is 5 minutes
-
-# Scheduler / reconcile
-ORCH_SCHEDULER_INTERVAL=3s # interval for running the scheduler loop to detect and schedule pending sandboxes, default is 3 seconds
-ORCH_RECONCILE_INTERVAL=5s # interval for running the reconcile loop to detect and clean up expired sandboxes, default is 5 seconds
-ORCH_STATUS_SYNC_INTERVAL=20s # interval for syncing sandbox status from sbxlet, default is 20 seconds
-ORCH_STATUS_SYNC_TIMEOUT=5s # timeout for syncing sandbox status from sbxlet, default is 5 seconds
-ORCH_STATUS_SYNC_BATCH_SIZE=50 # number of sandboxes to sync status for in each batch during the status sync loop, default is 50
-ORCH_STATUS_SYNC_MAX_PARALLEL=4 # maximum number of parallel status sync operations when syncing sandbox status from sbxlet, default is 4
-ORCH_HOSTPORT_MIN=10000 # minimum host port number for sandbox port forwarding, default is 10000
-ORCH_HOSTPORT_MAX=32767 # maximum host port number for sandbox port forwarding, default is 32767
-
-# API create rate limit
-ORCH_CREATE_RPS=20 # rate limit for creating sandboxes through the API, default is 20 requests per second
-ORCH_CREATE_BURST=40 # burst limit for creating sandboxes through the API, default is 40 requests
-
-ORCH_SHUTDOWN_TIMEOUT=5s # timeout for graceful shutdown of the orchestrator, default is 5 seconds
+```shell
+sudo ./build/sbxorch --config /var/lib/sandboxd/sbxorch_config.json
 ```
 
 ## sbxctl
 
-```ini
-SBXCTL_SERVER=http://10.10.0.1:8082 # server address for sbxctl to connect to the sbxorch API server. This can also be specified using the --server flag when running sbxctl commands.
+Example file: [`configs/sbxctl_config.json`](./configs/sbxctl_config.json)
+
+Compatible environment variable override: `SBXCTL_SERVER`
+
+```shell
+./build/sbxctl --config /var/lib/sandboxd/sbxctl_config.json get sandboxes
 ```
 
 # Testing
