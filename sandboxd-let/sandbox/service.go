@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"sandboxd-o/pkg/configutil"
 	"sandboxd-o/sandboxd-let/config"
 	"sandboxd-o/sandboxd-let/model"
 	"sandboxd-o/sandboxd-let/network"
@@ -99,7 +98,7 @@ func New(ctx context.Context, cfg config.Config) (*Service, error) {
 		return nil, err
 	}
 
-	if err := network.EnsureGlobalChains(ipt, configutil.CSVEnv("SANDBOX_FORWARD_HOOK_CHAINS", []string{"FORWARD", "DOCKER-USER"})); err != nil {
+	if err := network.EnsureGlobalChains(ipt, cfg.ForwardHookChains); err != nil {
 		_ = cri.Close()
 		return nil, err
 	}

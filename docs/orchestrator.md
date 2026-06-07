@@ -595,20 +595,8 @@ Resolved host port mapping used by scheduler and runtime provisioning:
 - If `readiness_probe` is set, sbxlet stays `creating` until probe success threshold is met; failures beyond threshold transition sbxlet to `error`, which syncs to orchestrator `Failed`.
 - Readiness is evaluated against sandbox-private endpoints (`sandboxIP:port`). This does not guarantee external/published host-port reachability from every client network path.
 
-## Environment Variables
+## Configuration
 
-- `ORCH_NODE_PROBE_TIMEOUT`  
-  Timeout for lightweight node liveness/resource probes.  
-  Default: `3s`
-
-- `ORCH_SANDBOX_OP_TIMEOUT`  
-  Timeout for sandbox lifecycle/proxy operations (`create/get/list/delete/logs/reconcile`).  
-  Default: `60s`
-
-- `ORCH_CREATE_RPS`  
-  Create-sandbox API token refill rate (requests per second).  
-  Default: `20`
-
-- `ORCH_CREATE_BURST`  
-  Create-sandbox API token bucket size (burst capacity).  
-  Default: `40`
+- Default config file: `/var/lib/sandboxd/sbxorch_config.json`
+- Example config: `configs/sbxorch_config.json`
+- Compatible environment variable overrides are still supported for backward compatibility, including `ORCH_NODE_PROBE_TIMEOUT`, `ORCH_SANDBOX_OP_TIMEOUT`, `ORCH_CREATE_RPS`, and `ORCH_CREATE_BURST`, but JSON config is the recommended mechanism.

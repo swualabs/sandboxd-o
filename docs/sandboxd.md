@@ -454,11 +454,11 @@ Note:
 }
 ```
 
-## Logging Environment Variables
+## Logging Configuration
 
-- `SANDBOX_LOG_DIR` (optional; when set, JSON logs are also written to rotating hourly files)
-- `SANDBOX_LOG_FILE_PREFIX` (default: `sandboxd`)
-- `APP_ENV` (optional; added to `app` log field, e.g. `sandboxd:prod`)
+- Default config file: `/var/lib/sandboxd/sbxlet_config.json`
+- Logging keys: `log_dir`, `log_file_prefix`, `app_env`
+- Compatible environment variable overrides: `SANDBOX_LOG_DIR`, `SANDBOX_LOG_FILE_PREFIX`, `APP_ENV` (supported for backward compatibility, not recommended for new deployments)
 
 # Example Create Payload (Wordpress)
 
