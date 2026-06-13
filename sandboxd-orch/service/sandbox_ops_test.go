@@ -188,6 +188,86 @@ func TestCreateSandboxOnNode_ForwardsEphemeralStorage(t *testing.T) {
 	}
 }
 
+func TestCreateSandboxOnNode_ForwardsSharedVolumes(t *testing.T) {
+	var captured model.CreateSandboxRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/sandboxes" {
+			defer r.Body.Close()
+			if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
+			_ = json.NewEncoder(w).Encode(map[string]any{"sandbox": map[string]any{"id": "ok"}})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	s := newServiceWithNode(t, server)
+	defer s.Close()
+
+	_, err := s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
+		ID: "sbx-shared-vol",
+		Spec: types.SandboxSpec{
+			Volumes: []types.SandboxVolumeSpec{{
+				Name:             "runtime-state",
+				EphemeralStorage: "128Mi",
+			}},
+			Containers: []types.SandboxContainerSpec{
+				{
+					Name:  "app",
+					Image: "ubuntu:24.04",
+					VolumeMounts: []types.SandboxVolumeMount{{
+						Name:      "runtime-state",
+						MountPath: "/var/www/html",
+					}},
+					Resource: types.SandboxResource{
+						CPU:    "100m",
+						Memory: "64Mi",
+					},
+				},
+				{
+					Name:  "db",
+					Image: "mariadb:11",
+					VolumeMounts: []types.SandboxVolumeMount{{
+						Name:      "runtime-state",
+						MountPath: "/var/www/html",
+					}},
+					Resource: types.SandboxResource{
+						CPU:    "100m",
+						Memory: "64Mi",
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.runSchedulerOnce(context.Background())
+
+	if len(captured.Volumes) != 1 {
+		t.Fatalf("captured volumes=%d", len(captured.Volumes))
+	}
+	if captured.Volumes[0].Name != "runtime-state" || captured.Volumes[0].EphemeralStorage != "128Mi" {
+		t.Fatalf("captured volume mismatch: %+v", captured.Volumes[0])
+	}
+	if len(captured.Containers) != 2 {
+		t.Fatalf("captured containers=%d", len(captured.Containers))
+	}
+	for _, c := range captured.Containers {
+		if len(c.VolumeMounts) != 1 {
+			t.Fatalf("container %s mounts=%d", c.Name, len(c.VolumeMounts))
+		}
+		if c.VolumeMounts[0].Name != "runtime-state" || c.VolumeMounts[0].MountPath != "/var/www/html" {
+			t.Fatalf("container %s mount mismatch: %+v", c.Name, c.VolumeMounts[0])
+		}
+	}
+}
+
 func TestCreateSandbox_RejectsInvalidEphemeralStorage(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	defer server.Close()
@@ -205,6 +285,43 @@ func TestCreateSandbox_RejectsInvalidEphemeralStorage(t *testing.T) {
 					CPU:              "100m",
 					Memory:           "64Mi",
 					EphemeralStorage: "not-a-size",
+				},
+			}},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected create validation error")
+	}
+
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestCreateSandbox_RejectsInvalidSharedVolume(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	s := newServiceWithNode(t, server)
+	defer s.Close()
+
+	_, err := s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
+		ID: "sbx-invalid-shared-volume",
+		Spec: types.SandboxSpec{
+			Volumes: []types.SandboxVolumeSpec{{
+				Name:             "runtime-state",
+				EphemeralStorage: "not-a-size",
+			}},
+			Containers: []types.SandboxContainerSpec{{
+				Name:  "app",
+				Image: "ubuntu:24.04",
+				VolumeMounts: []types.SandboxVolumeMount{{
+					Name:      "runtime-state",
+					MountPath: "/data",
+				}},
+				Resource: types.SandboxResource{
+					CPU:    "100m",
+					Memory: "64Mi",
 				},
 			}},
 		},

@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"path"
 	"regexp"
 	"strings"
 )
@@ -28,6 +29,7 @@ func ValidateSandboxID(id string) error {
 }
 
 var safeSandboxIDRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
+var safeVolumeNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 
 func (r CreateSandboxRequest) Validate() error {
 	if err := ValidateSandboxID(r.ID); err != nil {
@@ -39,6 +41,28 @@ func (r CreateSandboxRequest) Validate() error {
 	}
 
 	seenNames := map[string]struct{}{}
+	knownVolumes := map[string]struct{}{}
+	for _, v := range r.Volumes {
+		name := strings.TrimSpace(v.Name)
+		if name == "" {
+			return fmt.Errorf("volume name is required")
+		}
+
+		if !safeVolumeNameRe.MatchString(name) {
+			return fmt.Errorf("volume %s: unsupported name", v.Name)
+		}
+
+		if strings.TrimSpace(v.EphemeralStorage) == "" {
+			return fmt.Errorf("volume %s: ephemeralStorage is required", name)
+		}
+
+		if _, ok := knownVolumes[name]; ok {
+			return fmt.Errorf("duplicate volume name: %s", name)
+		}
+
+		knownVolumes[name] = struct{}{}
+	}
+
 	for _, c := range r.Containers {
 		if c.Name == "" || c.Image == "" {
 			return fmt.Errorf("container name and image are required")
@@ -57,6 +81,45 @@ func (r CreateSandboxRequest) Validate() error {
 		}
 
 		seenNames[c.Name] = struct{}{}
+
+		seenMountPaths := map[string]struct{}{}
+		for _, vm := range c.VolumeMounts {
+			volName := strings.TrimSpace(vm.Name)
+			if volName == "" {
+				return fmt.Errorf("container %s: volume mount name is required", c.Name)
+			}
+
+			if _, ok := knownVolumes[volName]; !ok {
+				return fmt.Errorf("container %s: unknown volume %s", c.Name, volName)
+			}
+
+			mountPath := strings.TrimSpace(vm.MountPath)
+			if mountPath == "" {
+				return fmt.Errorf("container %s: mountPath is required for volume %s", c.Name, volName)
+			}
+
+			if !strings.HasPrefix(mountPath, "/") {
+				return fmt.Errorf("container %s: mountPath must be absolute for volume %s", c.Name, volName)
+			}
+
+			if path.Clean(mountPath) != mountPath {
+				return fmt.Errorf("container %s: mountPath must be clean for volume %s", c.Name, volName)
+			}
+
+			if mountPath == "/" {
+				return fmt.Errorf("container %s: mountPath '/' is not allowed for volume %s", c.Name, volName)
+			}
+
+			if mountPath == "/tmp" {
+				return fmt.Errorf("container %s: mountPath /tmp is reserved", c.Name)
+			}
+
+			if _, ok := seenMountPaths[mountPath]; ok {
+				return fmt.Errorf("container %s: duplicate mountPath %s", c.Name, mountPath)
+			}
+
+			seenMountPaths[mountPath] = struct{}{}
+		}
 	}
 
 	seenHostPorts := map[int]struct{}{}

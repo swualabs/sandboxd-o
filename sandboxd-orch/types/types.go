@@ -110,8 +110,20 @@ type SandboxSpec struct {
 	Egress         bool                   `json:"egress" yaml:"egress"`
 	TTLSeconds     int64                  `json:"ttl_seconds,omitempty" yaml:"ttl_seconds,omitempty"`
 	Ports          []SandboxPortSpec      `json:"ports,omitempty" yaml:"ports,omitempty"`
+	Volumes        []SandboxVolumeSpec    `json:"volumes,omitempty" yaml:"volumes,omitempty"`
 	Containers     []SandboxContainerSpec `json:"containers" yaml:"containers"`
 	ReadinessProbe *ReadinessProbeSpec    `json:"readiness_probe,omitempty" yaml:"readiness_probe,omitempty"`
+}
+
+type SandboxVolumeSpec struct {
+	Name             string `json:"name" yaml:"name"`
+	EphemeralStorage string `json:"ephemeral_storage" yaml:"ephemeral_storage"`
+}
+
+type SandboxVolumeMount struct {
+	Name      string `json:"name" yaml:"name"`
+	MountPath string `json:"mount_path" yaml:"mount_path"`
+	ReadOnly  bool   `json:"read_only,omitempty" yaml:"read_only,omitempty"`
 }
 
 type ReadinessProbeSpec struct {
@@ -126,12 +138,13 @@ type ReadinessProbeSpec struct {
 }
 
 type SandboxContainerSpec struct {
-	Name     string          `json:"name" yaml:"name"`
-	Image    string          `json:"image" yaml:"image"`
-	Args     []string        `json:"args,omitempty" yaml:"args,omitempty"`
-	Env      []string        `json:"env,omitempty" yaml:"env,omitempty"`
-	WorkDir  string          `json:"work_dir,omitempty" yaml:"work_dir,omitempty"`
-	Resource SandboxResource `json:"resource" yaml:"resource"`
+	Name         string               `json:"name" yaml:"name"`
+	Image        string               `json:"image" yaml:"image"`
+	Args         []string             `json:"args,omitempty" yaml:"args,omitempty"`
+	Env          []string             `json:"env,omitempty" yaml:"env,omitempty"`
+	WorkDir      string               `json:"work_dir,omitempty" yaml:"work_dir,omitempty"`
+	VolumeMounts []SandboxVolumeMount `json:"volume_mounts,omitempty" yaml:"volume_mounts,omitempty"`
+	Resource     SandboxResource      `json:"resource" yaml:"resource"`
 }
 
 type SandboxResource struct {
