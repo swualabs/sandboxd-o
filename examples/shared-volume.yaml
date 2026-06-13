@@ -1,0 +1,45 @@
+apiVersion: sandboxd.o/v1
+kind: Sandbox
+id: shared-volume-demo
+spec:
+  egress: false
+  ttl_seconds: 3600
+  volumes:
+    - name: runtime-state
+      ephemeral_storage: 128Mi
+  containers:
+    - name: writer
+      image: alpine:3.20
+      args:
+        - sh
+        - -c
+        - |
+          mkdir -p /srv/runtime
+          while true; do
+            date -u +"%Y-%m-%dT%H:%M:%SZ" > /srv/runtime/heartbeat.txt
+            sleep 5
+          done
+      volume_mounts:
+        - name: runtime-state
+          mount_path: /srv/runtime
+      resource:
+        cpu: 100m
+        memory: 128Mi
+        ephemeral_storage: 96Mi
+    - name: reader
+      image: alpine:3.20
+      args:
+        - sh
+        - -c
+        - |
+          while true; do
+            cat /srv/runtime/heartbeat.txt 2>/dev/null || true
+            sleep 5
+          done
+      volume_mounts:
+        - name: runtime-state
+          mount_path: /srv/runtime
+      resource:
+        cpu: 100m
+        memory: 128Mi
+        ephemeral_storage: 96Mi

@@ -2,6 +2,17 @@ package model
 
 import "time"
 
+type VolumeSpec struct {
+	Name             string `json:"name"`
+	EphemeralStorage string `json:"ephemeralStorage"`
+}
+
+type VolumeMount struct {
+	Name      string `json:"name"`
+	MountPath string `json:"mountPath"`
+	ReadOnly  bool   `json:"readOnly,omitempty"`
+}
+
 type NodeResourceSnapshot struct {
 	CapacityCPUMilli    int64     `json:"capacity_cpu_milli"`
 	CapacityMemoryBytes int64     `json:"capacity_memory_bytes"`
@@ -25,6 +36,7 @@ type Sandbox struct {
 	BridgeName  string                    `json:"bridgeName"`
 	Egress      bool                      `json:"egress"`
 	Ports       []PortMapping             `json:"ports,omitempty"`
+	Volumes     []VolumeSpec              `json:"volumes,omitempty"`
 	Containers  map[string]ContainerState `json:"containers"`
 	PauseID     string                    `json:"pauseID,omitempty"`
 	CNIConfPath string                    `json:"cniConfPath"`
@@ -33,22 +45,24 @@ type Sandbox struct {
 }
 
 type ContainerState struct {
-	ID         string       `json:"id"`
-	Name       string       `json:"name"`
-	Phase      string       `json:"phase"`
-	Error      string       `json:"error,omitempty"`
-	Image      string       `json:"image"`
-	Args       []string     `json:"args,omitempty"`
-	Env        []string     `json:"env,omitempty"`
-	Resource   ResourceSpec `json:"resource"`
-	TaskPID    uint32       `json:"taskPID"`
-	Runtime    string       `json:"runtime"`
-	TaskStatus string       `json:"taskStatus,omitempty"`
+	ID           string        `json:"id"`
+	Name         string        `json:"name"`
+	Phase        string        `json:"phase"`
+	Error        string        `json:"error,omitempty"`
+	Image        string        `json:"image"`
+	Args         []string      `json:"args,omitempty"`
+	Env          []string      `json:"env,omitempty"`
+	VolumeMounts []VolumeMount `json:"volumeMounts,omitempty"`
+	Resource     ResourceSpec  `json:"resource"`
+	TaskPID      uint32        `json:"taskPID"`
+	Runtime      string        `json:"runtime"`
+	TaskStatus   string        `json:"taskStatus,omitempty"`
 }
 
 type CreateSandboxRequest struct {
 	ID         string                   `json:"id"`
 	Egress     bool                     `json:"egress"`
+	Volumes    []VolumeSpec             `json:"volumes,omitempty"`
 	Containers []CreateContainerRequest `json:"containers"`
 	Ports      []PortMapping            `json:"ports"`
 	Readiness  *ReadinessProbeSpec      `json:"readinessProbe,omitempty"`
@@ -66,12 +80,13 @@ type ReadinessProbeSpec struct {
 }
 
 type CreateContainerRequest struct {
-	Name     string       `json:"name"`
-	Image    string       `json:"image"`
-	Args     []string     `json:"args"`
-	Env      []string     `json:"env"`
-	WorkDir  string       `json:"workDir"`
-	Resource ResourceSpec `json:"resource"`
+	Name         string        `json:"name"`
+	Image        string        `json:"image"`
+	Args         []string      `json:"args"`
+	Env          []string      `json:"env"`
+	WorkDir      string        `json:"workDir"`
+	VolumeMounts []VolumeMount `json:"volumeMounts,omitempty"`
+	Resource     ResourceSpec  `json:"resource"`
 }
 
 type ResourceLimits struct {

@@ -210,3 +210,151 @@ func TestValidate_ReadinessProbeInvalidCases(t *testing.T) {
 		})
 	}
 }
+
+func TestValidate_SharedVolumesOK(t *testing.T) {
+	r := validReq()
+	r.Volumes = []VolumeSpec{{
+		Name:             "runtime-state",
+		EphemeralStorage: "128Mi",
+	}}
+	r.Containers[0].VolumeMounts = []VolumeMount{{
+		Name:      "runtime-state",
+		MountPath: "/var/www/html",
+	}}
+
+	if err := r.Validate(); err != nil {
+		t.Fatalf("expected valid shared volume config, got err=%v", err)
+	}
+}
+
+func TestValidate_SharedVolumeInvalidCases(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*CreateSandboxRequest)
+	}{
+		{
+			name: "missing volume name",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{EphemeralStorage: "64Mi"}}
+			},
+		},
+		{
+			name: "invalid volume name",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{Name: "bad/name", EphemeralStorage: "64Mi"}}
+			},
+		},
+		{
+			name: "duplicate volume name",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{
+					{Name: "shared", EphemeralStorage: "64Mi"},
+					{Name: "shared", EphemeralStorage: "64Mi"},
+				}
+			},
+		},
+		{
+			name: "missing volume size",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{Name: "shared"}}
+			},
+		},
+		{
+			name: "zero volume size",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{Name: "shared", EphemeralStorage: "0"}}
+			},
+		},
+		{
+			name: "unknown volume mount",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{Name: "shared", EphemeralStorage: "64Mi"}}
+				r.Containers[0].VolumeMounts = []VolumeMount{{Name: "missing", MountPath: "/data"}}
+			},
+		},
+		{
+			name: "missing container name",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Containers[0].Name = ""
+			},
+		},
+		{
+			name: "missing container image",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Containers[0].Image = ""
+			},
+		},
+		{
+			name: "missing mount volume name",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{Name: "shared", EphemeralStorage: "64Mi"}}
+				r.Containers[0].VolumeMounts = []VolumeMount{{MountPath: "/data"}}
+			},
+		},
+		{
+			name: "missing mount path",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{Name: "shared", EphemeralStorage: "64Mi"}}
+				r.Containers[0].VolumeMounts = []VolumeMount{{Name: "shared"}}
+			},
+		},
+		{
+			name: "relative mount path",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{Name: "shared", EphemeralStorage: "64Mi"}}
+				r.Containers[0].VolumeMounts = []VolumeMount{{Name: "shared", MountPath: "data"}}
+			},
+		},
+		{
+			name: "unclean mount path",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{Name: "shared", EphemeralStorage: "64Mi"}}
+				r.Containers[0].VolumeMounts = []VolumeMount{{Name: "shared", MountPath: "/data/../tmp"}}
+			},
+		},
+		{
+			name: "root mount path",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{Name: "shared", EphemeralStorage: "64Mi"}}
+				r.Containers[0].VolumeMounts = []VolumeMount{{Name: "shared", MountPath: "/"}}
+			},
+		},
+		{
+			name: "reserved tmp mount path",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{Name: "shared", EphemeralStorage: "64Mi"}}
+				r.Containers[0].VolumeMounts = []VolumeMount{{Name: "shared", MountPath: "/tmp"}}
+			},
+		},
+		{
+			name: "reserved tmp subpath mount",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{Name: "shared", EphemeralStorage: "64Mi"}}
+				r.Containers[0].VolumeMounts = []VolumeMount{{Name: "shared", MountPath: "/tmp/shared"}}
+			},
+		},
+		{
+			name: "duplicate mount path",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{
+					{Name: "shared-a", EphemeralStorage: "64Mi"},
+					{Name: "shared-b", EphemeralStorage: "64Mi"},
+				}
+				r.Containers[0].VolumeMounts = []VolumeMount{
+					{Name: "shared-a", MountPath: "/data"},
+					{Name: "shared-b", MountPath: "/data"},
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := validReq()
+			tc.mutate(&r)
+			if err := r.Validate(); err == nil {
+				t.Fatalf("expected error for case %q", tc.name)
+			}
+		})
+	}
+}
