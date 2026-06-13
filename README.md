@@ -406,7 +406,7 @@ Additionally, since `egress` is set to `true`, outbound traffic to external netw
 
 ### volumes
 
-Sandbox may define sandbox-local shared ephemeral volumes through `spec.volumes`.
+A Sandbox may define sandbox-local shared ephemeral volumes through `spec.volumes`.
 
 ```yaml
 - name: runtime-state

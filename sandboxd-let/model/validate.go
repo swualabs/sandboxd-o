@@ -5,6 +5,8 @@ import (
 	"path"
 	"regexp"
 	"strings"
+
+	k8sresource "k8s.io/apimachinery/pkg/api/resource"
 )
 
 func ValidateSandboxID(id string) error {
@@ -54,6 +56,11 @@ func (r CreateSandboxRequest) Validate() error {
 
 		if strings.TrimSpace(v.EphemeralStorage) == "" {
 			return fmt.Errorf("volume %s: ephemeralStorage is required", name)
+		}
+
+		q, err := k8sresource.ParseQuantity(strings.TrimSpace(v.EphemeralStorage))
+		if err != nil || q.Value() <= 0 {
+			return fmt.Errorf("volume %s: invalid ephemeralStorage", name)
 		}
 
 		if _, ok := knownVolumes[name]; ok {
@@ -110,7 +117,7 @@ func (r CreateSandboxRequest) Validate() error {
 				return fmt.Errorf("container %s: mountPath '/' is not allowed for volume %s", c.Name, volName)
 			}
 
-			if mountPath == "/tmp" {
+			if mountPath == "/tmp" || strings.HasPrefix(mountPath, "/tmp/") {
 				return fmt.Errorf("container %s: mountPath /tmp is reserved", c.Name)
 			}
 

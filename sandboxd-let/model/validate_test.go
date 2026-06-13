@@ -260,6 +260,12 @@ func TestValidate_SharedVolumeInvalidCases(t *testing.T) {
 			},
 		},
 		{
+			name: "zero volume size",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{Name: "shared", EphemeralStorage: "0"}}
+			},
+		},
+		{
 			name: "unknown volume mount",
 			mutate: func(r *CreateSandboxRequest) {
 				r.Volumes = []VolumeSpec{{Name: "shared", EphemeralStorage: "64Mi"}}
@@ -318,6 +324,13 @@ func TestValidate_SharedVolumeInvalidCases(t *testing.T) {
 			mutate: func(r *CreateSandboxRequest) {
 				r.Volumes = []VolumeSpec{{Name: "shared", EphemeralStorage: "64Mi"}}
 				r.Containers[0].VolumeMounts = []VolumeMount{{Name: "shared", MountPath: "/tmp"}}
+			},
+		},
+		{
+			name: "reserved tmp subpath mount",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{Name: "shared", EphemeralStorage: "64Mi"}}
+				r.Containers[0].VolumeMounts = []VolumeMount{{Name: "shared", MountPath: "/tmp/shared"}}
 			},
 		},
 		{

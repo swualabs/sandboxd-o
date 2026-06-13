@@ -179,7 +179,8 @@ func validateSandboxCreate(req types.CreateSandboxObjectRequest) error {
 			return fmt.Errorf("%w: volume %s ephemeral_storage is required", ErrInvalidInput, name)
 		}
 
-		if _, err := parseMemoryBytes(v.EphemeralStorage); err != nil {
+		sizeBytes, err := parseMemoryBytes(v.EphemeralStorage)
+		if err != nil || sizeBytes <= 0 {
 			return fmt.Errorf("%w: invalid ephemeral_storage for volume %s", ErrInvalidInput, name)
 		}
 
@@ -241,7 +242,7 @@ func validateSandboxCreate(req types.CreateSandboxObjectRequest) error {
 				return fmt.Errorf("%w: container %s mount_path '/' is not allowed for volume %s", ErrInvalidInput, c.Name, volName)
 			}
 
-			if mountPath == "/tmp" {
+			if mountPath == "/tmp" || strings.HasPrefix(mountPath, "/tmp/") {
 				return fmt.Errorf("%w: container %s mount_path /tmp is reserved", ErrInvalidInput, c.Name)
 			}
 

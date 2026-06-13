@@ -387,6 +387,12 @@ func TestCreateSandbox_RejectsInvalidSharedVolumeAndMountInputs(t *testing.T) {
 			},
 		},
 		{
+			name: "zero volume ephemeral storage",
+			mutate: func(r *types.CreateSandboxObjectRequest) {
+				r.Spec.Volumes[0].EphemeralStorage = "0"
+			},
+		},
+		{
 			name: "duplicate volume names",
 			mutate: func(r *types.CreateSandboxObjectRequest) {
 				r.Spec.Volumes = append(r.Spec.Volumes, types.SandboxVolumeSpec{
@@ -435,6 +441,12 @@ func TestCreateSandbox_RejectsInvalidSharedVolumeAndMountInputs(t *testing.T) {
 			name: "reserved tmp mount path",
 			mutate: func(r *types.CreateSandboxObjectRequest) {
 				r.Spec.Containers[0].VolumeMounts[0].MountPath = "/tmp"
+			},
+		},
+		{
+			name: "reserved tmp subpath mount",
+			mutate: func(r *types.CreateSandboxObjectRequest) {
+				r.Spec.Containers[0].VolumeMounts[0].MountPath = "/tmp/shared"
 			},
 		},
 		{
