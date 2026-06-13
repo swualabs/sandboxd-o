@@ -233,6 +233,18 @@ func TestValidate_SharedVolumeInvalidCases(t *testing.T) {
 		mutate func(*CreateSandboxRequest)
 	}{
 		{
+			name: "missing volume name",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{EphemeralStorage: "64Mi"}}
+			},
+		},
+		{
+			name: "invalid volume name",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{Name: "bad/name", EphemeralStorage: "64Mi"}}
+			},
+		},
+		{
 			name: "duplicate volume name",
 			mutate: func(r *CreateSandboxRequest) {
 				r.Volumes = []VolumeSpec{
@@ -250,7 +262,34 @@ func TestValidate_SharedVolumeInvalidCases(t *testing.T) {
 		{
 			name: "unknown volume mount",
 			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{Name: "shared", EphemeralStorage: "64Mi"}}
 				r.Containers[0].VolumeMounts = []VolumeMount{{Name: "missing", MountPath: "/data"}}
+			},
+		},
+		{
+			name: "missing container name",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Containers[0].Name = ""
+			},
+		},
+		{
+			name: "missing container image",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Containers[0].Image = ""
+			},
+		},
+		{
+			name: "missing mount volume name",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{Name: "shared", EphemeralStorage: "64Mi"}}
+				r.Containers[0].VolumeMounts = []VolumeMount{{MountPath: "/data"}}
+			},
+		},
+		{
+			name: "missing mount path",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{Name: "shared", EphemeralStorage: "64Mi"}}
+				r.Containers[0].VolumeMounts = []VolumeMount{{Name: "shared"}}
 			},
 		},
 		{
@@ -258,6 +297,20 @@ func TestValidate_SharedVolumeInvalidCases(t *testing.T) {
 			mutate: func(r *CreateSandboxRequest) {
 				r.Volumes = []VolumeSpec{{Name: "shared", EphemeralStorage: "64Mi"}}
 				r.Containers[0].VolumeMounts = []VolumeMount{{Name: "shared", MountPath: "data"}}
+			},
+		},
+		{
+			name: "unclean mount path",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{Name: "shared", EphemeralStorage: "64Mi"}}
+				r.Containers[0].VolumeMounts = []VolumeMount{{Name: "shared", MountPath: "/data/../tmp"}}
+			},
+		},
+		{
+			name: "root mount path",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{Name: "shared", EphemeralStorage: "64Mi"}}
+				r.Containers[0].VolumeMounts = []VolumeMount{{Name: "shared", MountPath: "/"}}
 			},
 		},
 		{

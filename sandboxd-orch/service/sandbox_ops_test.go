@@ -335,6 +335,143 @@ func TestCreateSandbox_RejectsInvalidSharedVolume(t *testing.T) {
 	}
 }
 
+func TestCreateSandbox_RejectsInvalidSharedVolumeAndMountInputs(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	s := newServiceWithNode(t, server)
+	defer s.Close()
+
+	base := types.CreateSandboxObjectRequest{
+		ID: "sbx-shared-volume-cases",
+		Spec: types.SandboxSpec{
+			Volumes: []types.SandboxVolumeSpec{{
+				Name:             "runtime-state",
+				EphemeralStorage: "64Mi",
+			}},
+			Containers: []types.SandboxContainerSpec{{
+				Name:  "app",
+				Image: "ubuntu:24.04",
+				VolumeMounts: []types.SandboxVolumeMount{{
+					Name:      "runtime-state",
+					MountPath: "/data",
+				}},
+				Resource: types.SandboxResource{
+					CPU:    "100m",
+					Memory: "64Mi",
+				},
+			}},
+		},
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(*types.CreateSandboxObjectRequest)
+	}{
+		{
+			name: "missing volume name",
+			mutate: func(r *types.CreateSandboxObjectRequest) {
+				r.Spec.Volumes[0].Name = ""
+			},
+		},
+		{
+			name: "invalid volume name",
+			mutate: func(r *types.CreateSandboxObjectRequest) {
+				r.Spec.Volumes[0].Name = "bad/name"
+			},
+		},
+		{
+			name: "missing volume ephemeral storage",
+			mutate: func(r *types.CreateSandboxObjectRequest) {
+				r.Spec.Volumes[0].EphemeralStorage = ""
+			},
+		},
+		{
+			name: "duplicate volume names",
+			mutate: func(r *types.CreateSandboxObjectRequest) {
+				r.Spec.Volumes = append(r.Spec.Volumes, types.SandboxVolumeSpec{
+					Name:             "runtime-state",
+					EphemeralStorage: "64Mi",
+				})
+			},
+		},
+		{
+			name: "missing mount name",
+			mutate: func(r *types.CreateSandboxObjectRequest) {
+				r.Spec.Containers[0].VolumeMounts[0].Name = ""
+			},
+		},
+		{
+			name: "unknown volume mount",
+			mutate: func(r *types.CreateSandboxObjectRequest) {
+				r.Spec.Containers[0].VolumeMounts[0].Name = "missing"
+			},
+		},
+		{
+			name: "missing mount path",
+			mutate: func(r *types.CreateSandboxObjectRequest) {
+				r.Spec.Containers[0].VolumeMounts[0].MountPath = ""
+			},
+		},
+		{
+			name: "relative mount path",
+			mutate: func(r *types.CreateSandboxObjectRequest) {
+				r.Spec.Containers[0].VolumeMounts[0].MountPath = "data"
+			},
+		},
+		{
+			name: "unclean mount path",
+			mutate: func(r *types.CreateSandboxObjectRequest) {
+				r.Spec.Containers[0].VolumeMounts[0].MountPath = "/data/../tmp"
+			},
+		},
+		{
+			name: "root mount path",
+			mutate: func(r *types.CreateSandboxObjectRequest) {
+				r.Spec.Containers[0].VolumeMounts[0].MountPath = "/"
+			},
+		},
+		{
+			name: "reserved tmp mount path",
+			mutate: func(r *types.CreateSandboxObjectRequest) {
+				r.Spec.Containers[0].VolumeMounts[0].MountPath = "/tmp"
+			},
+		},
+		{
+			name: "duplicate mount path",
+			mutate: func(r *types.CreateSandboxObjectRequest) {
+				r.Spec.Volumes = append(r.Spec.Volumes, types.SandboxVolumeSpec{
+					Name:             "shared-b",
+					EphemeralStorage: "64Mi",
+				})
+				r.Spec.Containers[0].VolumeMounts = append(r.Spec.Containers[0].VolumeMounts, types.SandboxVolumeMount{
+					Name:      "shared-b",
+					MountPath: "/data",
+				})
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := base
+			req.Spec.Volumes = append([]types.SandboxVolumeSpec(nil), base.Spec.Volumes...)
+			req.Spec.Containers = append([]types.SandboxContainerSpec(nil), base.Spec.Containers...)
+			req.Spec.Containers[0].VolumeMounts = append([]types.SandboxVolumeMount(nil), base.Spec.Containers[0].VolumeMounts...)
+			tc.mutate(&req)
+
+			_, err := s.CreateSandbox(context.Background(), req)
+			if err == nil {
+				t.Fatal("expected create validation error")
+			}
+
+			if !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("expected ErrInvalidInput, got %v", err)
+			}
+		})
+	}
+}
+
 func TestScheduler_AssignsDistinctPortsAcrossSandboxes(t *testing.T) {
 	sbxNode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.Path == "/v1/sandboxes" {
