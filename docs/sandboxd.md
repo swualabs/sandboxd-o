@@ -65,6 +65,12 @@ Base URL: `http://localhost:8080`
             "protocol": "tcp"
         }
     ],
+    "volumes": [
+        {
+            "name": "runtime-state",
+            "ephemeralStorage": "128Mi"
+        }
+    ],
     "readinessProbe": {
         "protocol": "http",
         "port": 8080,
@@ -86,6 +92,12 @@ Base URL: `http://localhost:8080`
             ],
             "env": [],
             "workDir": "",
+            "volumeMounts": [
+                {
+                    "name": "runtime-state",
+                    "mountPath": "/srv/runtime"
+                }
+            ],
             "resource": {
                 "cpu": "250m",
                 "memory": "256Mi",
@@ -98,6 +110,12 @@ Base URL: `http://localhost:8080`
             "args": ["sh", "-c", "while true; do sleep 60; done"],
             "env": [],
             "workDir": "",
+            "volumeMounts": [
+                {
+                    "name": "runtime-state",
+                    "mountPath": "/srv/runtime"
+                }
+            ],
             "resource": {
                 "cpu": "100m",
                 "memory": "128Mi",
@@ -109,6 +127,10 @@ Base URL: `http://localhost:8080`
 ```
 
 - `readinessProbe` is optional.
+- `volumes` is optional and defines sandbox-local shared tmpfs volumes.
+- `containers[].volumeMounts` is optional and may reference entries declared in `volumes`.
+- Shared volumes are never shared across sandboxes and are deleted with the sandbox.
+- `containers[].volumeMounts[].mountPath` must be an absolute path and cannot be `/tmp`.
 - If provided, all fields inside `readinessProbe` are required.
 - `protocol` supports `tcp` and `http`.
 - If `protocol` is `http`, `path` is required and must start with `/`.
@@ -445,6 +467,17 @@ Note:
     - `/` writable layer: 80%
     - `/tmp`: 20%
 - Exceeding each split limit returns `ENOSPC`.
+
+### `volumes[].ephemeralStorage`
+
+- Required size limit for a sandbox-local shared tmpfs volume.
+- Exceeding the volume limit returns `ENOSPC`.
+
+### `containers[].volumeMounts[]` (optional)
+
+- `name` must reference one of `volumes[].name`.
+- `mountPath` must be an absolute path inside the container.
+- `/tmp` is reserved for the container's own ephemeral tmpfs budget and cannot be used here.
 
 ## Common Error Response
 

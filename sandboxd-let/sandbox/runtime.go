@@ -375,6 +375,16 @@ func (s *Service) createAndStartCRIContainer(ctx context.Context, sbx *model.San
 	}
 
 	mounts := []*runtimeapi.Mount{}
+	volumeSizes := make(map[string]int64, len(sbx.Volumes))
+	for _, v := range sbx.Volumes {
+		bytes, err := parseMemoryBytes(v.EphemeralStorage)
+		if err != nil {
+			return model.ContainerState{}, fmt.Errorf("volume %s: invalid ephemeralStorage: %s", v.Name, v.EphemeralStorage)
+		}
+
+		volumeSizes[v.Name] = bytes
+	}
+
 	// t := time.Now()
 	tmpHostPath, err := s.ensureSandboxTmpfsMount(sbx.ID, c.Name, "tmp", lim.TmpfsBytes)
 	// slog.Info("perf.stage", slog.String("sandbox", sbx.ID), slog.String("container", c.Name), slog.String("stage", "container.ensure_tmpfs_mount"), slog.Duration("duration", time.Since(t)))
@@ -387,6 +397,19 @@ func (s *Service) createAndStartCRIContainer(ctx context.Context, sbx *model.San
 			ContainerPath: "/tmp",
 			HostPath:      tmpHostPath,
 			Readonly:      false,
+		})
+	}
+
+	for _, vm := range c.VolumeMounts {
+		hostPath, err := s.ensureSandboxVolumeMount(sbx.ID, vm.Name, volumeSizes[vm.Name])
+		if err != nil {
+			return model.ContainerState{}, err
+		}
+
+		mounts = append(mounts, &runtimeapi.Mount{
+			ContainerPath: vm.MountPath,
+			HostPath:      hostPath,
+			Readonly:      vm.ReadOnly,
 		})
 	}
 
@@ -464,17 +487,51 @@ func (s *Service) createAndStartCRIContainer(ctx context.Context, sbx *model.San
 	// slog.Info("perf.stage", slog.String("sandbox", sbx.ID), slog.String("container", c.Name), slog.String("stage", "container.create_start_total"), slog.Duration("duration", time.Since(t0)))
 
 	return model.ContainerState{
-		ID:         details.ID,
-		Name:       c.Name,
-		Phase:      ContainerPhaseRunning,
-		Image:      normalizeImage(c.Image),
-		Args:       c.Args,
-		Env:        c.Env,
-		Resource:   c.Resource,
-		TaskPID:    details.PID,
-		Runtime:    s.runtimeBinary,
-		TaskStatus: "running",
+		ID:           details.ID,
+		Name:         c.Name,
+		Phase:        ContainerPhaseRunning,
+		Image:        normalizeImage(c.Image),
+		Args:         c.Args,
+		Env:          c.Env,
+		VolumeMounts: append([]model.VolumeMount(nil), c.VolumeMounts...),
+		Resource:     c.Resource,
+		TaskPID:      details.PID,
+		Runtime:      s.runtimeBinary,
+		TaskStatus:   "running",
 	}, nil
+}
+
+func (s *Service) ensureSandboxVolumeMount(sandboxID, volumeName string, bytes int64) (string, error) {
+	if bytes <= 0 {
+		return "", fmt.Errorf("volume %s has invalid size", volumeName)
+	}
+
+	if err := model.ValidateSandboxID(sandboxID); err != nil {
+		return "", err
+	}
+
+	if !safeCgroupNameRe.MatchString(strings.TrimSpace(volumeName)) {
+		return "", fmt.Errorf("volume %s has unsupported name", volumeName)
+	}
+
+	base := filepath.Join(s.cfg.StateBaseDir, sandboxID, "volumes", volumeName)
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		return "", fmt.Errorf("mkdir volume mount path %s: %w", base, err)
+	}
+
+	resolvedBase := resolvePath(base)
+	if isMountPoint(resolvedBase) {
+		return resolvedBase, nil
+	}
+
+	opt := fmt.Sprintf("size=%d,mode=1777", bytes)
+	cmd := exec.Command("mount", "-t", "tmpfs", "-o", opt, "tmpfs", resolvedBase)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("mount volume %s tmpfs %s (%s): %w: %s", volumeName, resolvedBase, opt, err, strings.TrimSpace(string(out)))
+	}
+
+	return resolvedBase, nil
 }
 
 func (s *Service) ensureSandboxTmpfsMount(sandboxID, containerName, kind string, bytes int64) (string, error) {
@@ -582,6 +639,7 @@ func (s *Service) deleteSandboxRuntimeArtifacts(ctx context.Context, sbx *model.
 	s.cleanupSandboxNetworkPolicy(sbx)
 	s.cleanupSandboxCNI(ctx, sbx.ID)
 	s.cleanupSandboxTmpfsMounts(sbx.ID)
+	s.cleanupSandboxVolumeMounts(sbx.ID)
 	cleanupSandboxParentCgroup(s.cfg.CgroupParent, sbx.ID)
 	s.dbg("cleanup runtime artifacts done sandbox=%s", sbx.ID)
 
@@ -594,6 +652,29 @@ func (s *Service) cleanupSandboxTmpfsMounts(sandboxID string) {
 	}
 
 	base := resolvePath(filepath.Join(s.cfg.StateBaseDir, sandboxID, "tmpfs"))
+	_ = filepath.Walk(base, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || !info.IsDir() {
+			return nil
+		}
+
+		resolvedPath := resolvePath(path)
+		if !isMountPoint(resolvedPath) {
+			return nil
+		}
+
+		_ = exec.Command("umount", "-l", resolvedPath).Run()
+		return nil
+	})
+
+	_ = os.RemoveAll(base)
+}
+
+func (s *Service) cleanupSandboxVolumeMounts(sandboxID string) {
+	if err := model.ValidateSandboxID(sandboxID); err != nil {
+		return
+	}
+
+	base := resolvePath(filepath.Join(s.cfg.StateBaseDir, sandboxID, "volumes"))
 	_ = filepath.Walk(base, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info == nil || !info.IsDir() {
 			return nil

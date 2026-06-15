@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"strings"
 	"time"
@@ -427,9 +428,7 @@ func printNewLogLines(w io.Writer, lines []string, printed map[string]int) error
 		return err
 	}
 
-	for line, count := range seen {
-		printed[line] = count
-	}
+	maps.Copy(printed, seen)
 
 	for line := range printed {
 		if _, ok := seen[line]; !ok {

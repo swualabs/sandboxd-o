@@ -34,6 +34,8 @@
     - [External](#external)
     - [Sandbox](#sandbox)
         - [egress, ttl_seconds, ports](#egress-ttl_seconds-ports)
+        - [volumes](#volumes)
+        - [volume_mounts](#volume_mounts)
         - [containers](#containers)
         - [Readiness Probe](#readiness-probe)
 - [Sandbox/Container State](#sandboxcontainer-state)
@@ -94,7 +96,9 @@ To achieve the project's core goal of providing "the strongest possible isolatio
 
 The filesystem surface can leverage `overlayfs` to provide a sandbox filesystem isolated from the host filesystem.
 
-This project follows the principle that once a sandbox is created, it must be treated as disposable and single-use. As a result, sharing or persisting filesystems (volumes) is not supported.
+This project follows the principle that once a sandbox is created, it must be treated as disposable and single-use. As a result, filesystems are never shared across sandboxes or persisted beyond sandbox lifetime.
+
+Within a single sandbox, however, the specification may define shared ephemeral volumes that can be mounted by multiple containers in that sandbox.
 
 ### Networking Model
 
@@ -400,13 +404,47 @@ Therefore, in the `wordpress.yaml` example above, the sandbox is automatically t
 
 Additionally, since `egress` is set to `true`, outbound traffic to external networks is permitted for this sandbox.
 
+### volumes
+
+A Sandbox may define sandbox-local shared ephemeral volumes through `spec.volumes`.
+
+```yaml
+- name: runtime-state
+  ephemeral_storage: 128Mi
+```
+
+- `name`: The volume name. It must be unique within the sandbox.
+
+- `ephemeral_storage`: Required size limit for the shared tmpfs volume. Once this limit is exceeded, writes return `ENOSPC`.
+
+Volumes are sandbox-local only. They are created when the sandbox starts and are deleted when the sandbox is removed. Sharing a volume across different sandboxes is not supported.
+
+### volume_mounts
+
+Each container may mount one or more sandbox-local shared volumes through `volume_mounts`.
+
+```yaml
+- name: runtime-state
+  mount_path: /var/www/html
+  read_only: false
+```
+
+- `name`: References one of the entries declared in `spec.volumes`.
+
+- `mount_path`: Absolute path inside the container where the shared volume will be mounted.
+
+- `read_only`: Optional flag that mounts the volume read-only for that container.
+
+> [!NOTE]
+> `/tmp` remains reserved for the container's own ephemeral tmpfs budget and cannot be used as a shared volume mount path.
+
 ### containers
 
 Sandbox fundamentally follows and is built upon the PodSandbox model, and therefore consists of a Pause Container and one or more Application Containers.
 
 The `containers` field represents the list of Application Containers included in this sandbox.
 
-Each container is composed of `name`, `image`, `args`, `env`, `work_dir`, and `resource`.
+Each container is composed of `name`, `image`, `args`, `env`, `work_dir`, `volume_mounts`, and `resource`.
 
 The following is an example container specification capable of running a sample application.
 
@@ -417,6 +455,9 @@ The following is an example container specification capable of running a sample 
   env:
       - SECRET_KEY=supersecretkey
   work_dir: '/app'
+  volume_mounts:
+      - name: runtime-state
+        mount_path: /srv/runtime
   resource:
       cpu: 100m
       memory: 256Mi

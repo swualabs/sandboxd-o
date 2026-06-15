@@ -242,6 +242,12 @@ Create a control-plane sandbox object for scheduling and reconciliation.
                 "protocol": "tcp"
             }
         ],
+        "volumes": [
+            {
+                "name": "runtime-state",
+                "ephemeral_storage": "128Mi"
+            }
+        ],
         "readiness_probe": {
             "protocol": "http",
             "port": 80,
@@ -259,6 +265,12 @@ Create a control-plane sandbox object for scheduling and reconciliation.
                 "args": [],
                 "env": [],
                 "work_dir": "",
+                "volume_mounts": [
+                    {
+                        "name": "runtime-state",
+                        "mount_path": "/usr/share/nginx/html"
+                    }
+                ],
                 "resource": {
                     "cpu": "200m",
                     "memory": "256Mi",
@@ -271,6 +283,10 @@ Create a control-plane sandbox object for scheduling and reconciliation.
 ```
 
 - `spec.readiness_probe` is optional.
+- `spec.volumes` is optional and defines sandbox-local shared tmpfs volumes.
+- `spec.containers[].volume_mounts` is optional and may reference entries declared in `spec.volumes`.
+- Shared volumes are never shared across sandboxes and are deleted with the sandbox.
+- `spec.containers[].volume_mounts[].mount_path` must be an absolute path and cannot be `/tmp`.
 - If set, all readiness probe fields are required.
 - `protocol` supports `tcp` and `http`. If `http` is used, `path` is required and must start with `/`.
 
@@ -332,10 +348,22 @@ List all control-plane sandbox objects.
                         "protocol": "tcp"
                     }
                 ],
+                "volumes": [
+                    {
+                        "name": "runtime-state",
+                        "ephemeral_storage": "128Mi"
+                    }
+                ],
                 "containers": [
                     {
                         "name": "web",
                         "image": "nginx:latest",
+                        "volume_mounts": [
+                            {
+                                "name": "runtime-state",
+                                "mount_path": "/usr/share/nginx/html"
+                            }
+                        ],
                         "resource": {
                             "cpu": "200m",
                             "memory": "256Mi",
@@ -480,10 +508,22 @@ Create sandbox directly on selected node (sbxlet API pass-through).
             "protocol": "tcp"
         }
     ],
+    "volumes": [
+        {
+            "name": "runtime-state",
+            "ephemeral_storage": "128Mi"
+        }
+    ],
     "containers": [
         {
             "name": "web",
             "image": "nginx:latest",
+            "volume_mounts": [
+                {
+                    "name": "runtime-state",
+                    "mount_path": "/usr/share/nginx/html"
+                }
+            ],
             "resource": {
                 "cpu": "200m",
                 "memory": "256Mi",

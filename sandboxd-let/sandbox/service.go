@@ -795,11 +795,13 @@ func copySandbox(in *model.Sandbox) *model.Sandbox {
 
 	out := *in
 	out.Ports = append([]model.PortMapping(nil), in.Ports...)
+	out.Volumes = append([]model.VolumeSpec(nil), in.Volumes...)
 	out.Containers = make(map[string]model.ContainerState, len(in.Containers))
 	for k, v := range in.Containers {
 		cp := v
 		cp.Args = append([]string(nil), v.Args...)
 		cp.Env = append([]string(nil), v.Env...)
+		cp.VolumeMounts = append([]model.VolumeMount(nil), v.VolumeMounts...)
 		out.Containers[k] = cp
 	}
 

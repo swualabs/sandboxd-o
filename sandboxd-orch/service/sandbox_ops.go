@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"path"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -20,6 +22,8 @@ import (
 
 	k8sresource "k8s.io/apimachinery/pkg/api/resource"
 )
+
+var safeVolumeNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 
 func (s *Service) CreateSandbox(ctx context.Context, req types.CreateSandboxObjectRequest) (*types.Sandbox, error) {
 	if err := validateSandboxCreate(req); err != nil {
@@ -160,6 +164,33 @@ func validateSandboxCreate(req types.CreateSandboxObjectRequest) error {
 		return fmt.Errorf("%w: ttl_seconds must be >= 0", ErrInvalidInput)
 	}
 
+	knownVolumes := map[string]struct{}{}
+	for _, v := range req.Spec.Volumes {
+		name := strings.TrimSpace(v.Name)
+		if name == "" {
+			return fmt.Errorf("%w: volume name is required", ErrInvalidInput)
+		}
+
+		if !safeVolumeNameRe.MatchString(name) {
+			return fmt.Errorf("%w: invalid volume name %s", ErrInvalidInput, v.Name)
+		}
+
+		if strings.TrimSpace(v.EphemeralStorage) == "" {
+			return fmt.Errorf("%w: volume %s ephemeral_storage is required", ErrInvalidInput, name)
+		}
+
+		sizeBytes, err := parseMemoryBytes(v.EphemeralStorage)
+		if err != nil || sizeBytes <= 0 {
+			return fmt.Errorf("%w: invalid ephemeral_storage for volume %s", ErrInvalidInput, name)
+		}
+
+		if _, exists := knownVolumes[name]; exists {
+			return fmt.Errorf("%w: duplicate volume name %s", ErrInvalidInput, name)
+		}
+
+		knownVolumes[name] = struct{}{}
+	}
+
 	for _, c := range req.Spec.Containers {
 		if strings.TrimSpace(c.Name) == "" || strings.TrimSpace(c.Image) == "" {
 			return fmt.Errorf("%w: container name and image are required", ErrInvalidInput)
@@ -181,6 +212,45 @@ func validateSandboxCreate(req types.CreateSandboxObjectRequest) error {
 			if _, err := parseMemoryBytes(c.Resource.EphemeralStorage); err != nil {
 				return fmt.Errorf("%w: invalid ephemeral_storage for container %s", ErrInvalidInput, c.Name)
 			}
+		}
+
+		seenMountPaths := map[string]struct{}{}
+		for _, vm := range c.VolumeMounts {
+			volName := strings.TrimSpace(vm.Name)
+			if volName == "" {
+				return fmt.Errorf("%w: container %s volume mount name is required", ErrInvalidInput, c.Name)
+			}
+
+			if _, ok := knownVolumes[volName]; !ok {
+				return fmt.Errorf("%w: container %s references unknown volume %s", ErrInvalidInput, c.Name, volName)
+			}
+
+			mountPath := strings.TrimSpace(vm.MountPath)
+			if mountPath == "" {
+				return fmt.Errorf("%w: container %s mount_path is required for volume %s", ErrInvalidInput, c.Name, volName)
+			}
+
+			if !strings.HasPrefix(mountPath, "/") {
+				return fmt.Errorf("%w: container %s mount_path must be absolute for volume %s", ErrInvalidInput, c.Name, volName)
+			}
+
+			if path.Clean(mountPath) != mountPath {
+				return fmt.Errorf("%w: container %s mount_path must be clean for volume %s", ErrInvalidInput, c.Name, volName)
+			}
+
+			if mountPath == "/" {
+				return fmt.Errorf("%w: container %s mount_path '/' is not allowed for volume %s", ErrInvalidInput, c.Name, volName)
+			}
+
+			if mountPath == "/tmp" || strings.HasPrefix(mountPath, "/tmp/") {
+				return fmt.Errorf("%w: container %s mount_path /tmp is reserved", ErrInvalidInput, c.Name)
+			}
+
+			if _, exists := seenMountPaths[mountPath]; exists {
+				return fmt.Errorf("%w: container %s duplicate mount_path %s", ErrInvalidInput, c.Name, mountPath)
+			}
+
+			seenMountPaths[mountPath] = struct{}{}
 		}
 	}
 
@@ -463,16 +533,33 @@ func (s *Service) createSandboxOnNode(ctx context.Context, sbx types.Sandbox) er
 
 	for _, c := range sbx.Spec.Containers {
 		req.Containers = append(req.Containers, model.CreateContainerRequest{
-			Name:    c.Name,
-			Image:   c.Image,
-			Args:    append([]string(nil), c.Args...),
-			Env:     append([]string(nil), c.Env...),
-			WorkDir: c.WorkDir,
+			Name:         c.Name,
+			Image:        c.Image,
+			Args:         append([]string(nil), c.Args...),
+			Env:          append([]string(nil), c.Env...),
+			WorkDir:      c.WorkDir,
+			VolumeMounts: make([]model.VolumeMount, 0, len(c.VolumeMounts)),
 			Resource: model.ResourceSpec{
 				CPU:              c.Resource.CPU,
 				Memory:           c.Resource.Memory,
 				EphemeralStorage: c.Resource.EphemeralStorage,
 			},
+		})
+
+		last := &req.Containers[len(req.Containers)-1]
+		for _, vm := range c.VolumeMounts {
+			last.VolumeMounts = append(last.VolumeMounts, model.VolumeMount{
+				Name:      vm.Name,
+				MountPath: vm.MountPath,
+				ReadOnly:  vm.ReadOnly,
+			})
+		}
+	}
+
+	for _, v := range sbx.Spec.Volumes {
+		req.Volumes = append(req.Volumes, model.VolumeSpec{
+			Name:             v.Name,
+			EphemeralStorage: v.EphemeralStorage,
 		})
 	}
 
