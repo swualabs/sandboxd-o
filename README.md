@@ -767,6 +767,11 @@ How it works:
 - Servers reject any request to a privileged route whose token does not match, returning `401 Unauthorized`. The token is compared in constant time.
 - The public, unauthenticated routes are limited to `GET /healthz` and `/swagger/*` so health checks and API docs keep working.
 
+`sbxorch` and `sbxlet` fail closed: they refuse to start when `shared_secret` is empty.
+
+> [!WARNING]
+> The committed example configs ship with a placeholder `shared_secret` (`MY_SHARED_SECRET`) so the daemons can start out of the box. This value is publicly known and **must be changed before any production use** — otherwise the authentication provides no protection. Set the same strong, randomly generated value on every component, for example `openssl rand -hex 32`.
+
 ## sbxlet
 
 Example file: [`configs/sbxlet_config.json`](./configs/sbxlet_config.json)
