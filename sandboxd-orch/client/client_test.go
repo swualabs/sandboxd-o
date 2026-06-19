@@ -25,7 +25,7 @@ func TestClient_HealthAndNodeStatus(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c := New(ts.URL, time.Second)
+	c := New(ts.URL, time.Second, "")
 	if err := c.Healthz(context.Background()); err != nil {
 		t.Fatalf("Healthz err=%v", err)
 	}
@@ -48,7 +48,7 @@ func TestClient_DoErrorBranches(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		c := New(ts.URL, time.Second)
+		c := New(ts.URL, time.Second, "")
 		_, err := c.GetSandbox(context.Background(), "x")
 		if err == nil || !strings.Contains(err.Error(), "bad request from upstream") {
 			t.Fatalf("expected upstream message error, got %v", err)
@@ -61,7 +61,7 @@ func TestClient_DoErrorBranches(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		c := New(ts.URL, time.Second)
+		c := New(ts.URL, time.Second, "")
 		_, err := c.GetSandbox(context.Background(), "x")
 		if err == nil || !strings.Contains(err.Error(), "502 Bad Gateway") {
 			t.Fatalf("expected status fallback, got %v", err)
@@ -75,7 +75,7 @@ func TestClient_DoErrorBranches(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		c := New(ts.URL, time.Second)
+		c := New(ts.URL, time.Second, "")
 		_, err := c.GetSandbox(context.Background(), "x")
 		if err == nil || !strings.Contains(err.Error(), "decode sandboxd response") {
 			t.Fatalf("expected decode error, got %v", err)
@@ -98,7 +98,7 @@ func TestClient_SandboxOps(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c := New(ts.URL, time.Second)
+	c := New(ts.URL, time.Second, "")
 	ctx := context.Background()
 	if _, err := c.Reconcile(ctx); err != nil {
 		t.Fatal(err)
@@ -147,7 +147,7 @@ func TestClient_GetSandboxLogsBuildsPathWithoutQuery(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c := New(ts.URL, time.Second)
+	c := New(ts.URL, time.Second, "")
 	if _, err := c.GetSandboxLogs(context.Background(), "s/1"); err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestClient_DoIntoAndEmptyBody(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		c := New(ts.URL, time.Second)
+		c := New(ts.URL, time.Second, "")
 		out, err := c.Reconcile(context.Background())
 		if err != nil {
 			t.Fatal(err)
@@ -186,7 +186,7 @@ func TestClient_DoIntoAndEmptyBody(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		c := New(ts.URL, time.Second)
+		c := New(ts.URL, time.Second, "")
 		var out SandboxStatusesResponse
 		if err := c.doInto(context.Background(), http.MethodPost, "/v1/sandboxes/statuses", map[string]any{"ids": []string{"s1"}}, &out); err != nil {
 			t.Fatal(err)
@@ -203,7 +203,7 @@ func TestClient_DoIntoAndEmptyBody(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		c := New(ts.URL, time.Second)
+		c := New(ts.URL, time.Second, "")
 		var out SandboxStatusesResponse
 		err := c.doInto(context.Background(), http.MethodPost, "/v1/sandboxes/statuses", map[string]any{"ids": []string{"s1"}}, &out)
 		if err == nil || !strings.Contains(err.Error(), "decode sandboxd response") {

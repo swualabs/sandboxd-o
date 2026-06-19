@@ -42,6 +42,7 @@ const (
 type Config struct {
 	AppEnv                   string        `json:"app_env,omitempty"`
 	HTTPAddr                 string        `json:"http_addr,omitempty"`
+	SharedSecret             string        `json:"shared_secret,omitempty"`
 	LogDir                   string        `json:"log_dir,omitempty"`
 	LogFilePrefix            string        `json:"log_file_prefix,omitempty"`
 	SQLitePath               string        `json:"sqlite_path,omitempty"`
@@ -143,6 +144,7 @@ func loadFile(path string, cfg *Config) error {
 func applyEnvOverrides(cfg *Config) {
 	cfg.AppEnv = envutil.Get("APP_ENV", cfg.AppEnv)
 	cfg.HTTPAddr = envutil.Get("ORCH_HTTP_ADDR", cfg.HTTPAddr)
+	cfg.SharedSecret = envutil.Get("SBX_SHARED_SECRET", cfg.SharedSecret)
 	cfg.LogDir = envutil.Get("ORCH_LOG_DIR", cfg.LogDir)
 	cfg.LogFilePrefix = envutil.Get("ORCH_LOG_FILE_PREFIX", cfg.LogFilePrefix)
 	cfg.SQLitePath = envutil.Get("ORCH_SQLITE_PATH", cfg.SQLitePath)
@@ -244,6 +246,7 @@ func normalize(cfg *Config) {
 type orchFileConfig struct {
 	AppEnv                   *string  `json:"app_env,omitempty"`
 	HTTPAddr                 *string  `json:"http_addr,omitempty"`
+	SharedSecret             *string  `json:"shared_secret,omitempty"`
 	LogDir                   *string  `json:"log_dir,omitempty"`
 	LogFilePrefix            *string  `json:"log_file_prefix,omitempty"`
 	SQLitePath               *string  `json:"sqlite_path,omitempty"`
@@ -273,6 +276,7 @@ type orchFileConfig struct {
 func (f orchFileConfig) apply(cfg *Config) {
 	setString(&cfg.AppEnv, f.AppEnv)
 	setString(&cfg.HTTPAddr, f.HTTPAddr)
+	setString(&cfg.SharedSecret, f.SharedSecret)
 	setString(&cfg.LogDir, f.LogDir)
 	setString(&cfg.LogFilePrefix, f.LogFilePrefix)
 	setString(&cfg.SQLitePath, f.SQLitePath)

@@ -1,6 +1,7 @@
 package http
 
 import (
+	"sandboxd-o/pkg/auth"
 	"sandboxd-o/pkg/httplog"
 	"sandboxd-o/pkg/logging"
 	"sandboxd-o/sandboxd-orch/config"
@@ -25,7 +26,7 @@ func NewRouter(svc *service.Service, cfg config.Config, logger *logging.Logger) 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerfiles.Handler, ginSwagger.InstanceName("orchestrator")))
 	r.GET("/healthz", h.Healthz)
 
-	api := r.Group("/api/v1")
+	api := r.Group("/api/v1", auth.Middleware(cfg.SharedSecret))
 	{
 		api.POST("/sandboxes", h.CreateSandbox)
 		api.GET("/sandboxes", h.ListSandboxes)

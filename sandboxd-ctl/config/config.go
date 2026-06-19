@@ -13,10 +13,11 @@ import (
 const DefaultConfigPath = "/var/lib/sandboxd/sbxctl_config.json"
 
 type Config struct {
-	Server  string        `json:"server,omitempty"`
-	Timeout time.Duration `json:"timeout,omitempty"`
-	Output  string        `json:"output,omitempty"`
-	Limit   int           `json:"limit,omitempty"`
+	Server       string        `json:"server,omitempty"`
+	SharedSecret string        `json:"shared_secret,omitempty"`
+	Timeout      time.Duration `json:"timeout,omitempty"`
+	Output       string        `json:"output,omitempty"`
+	Limit        int           `json:"limit,omitempty"`
 }
 
 func DefaultConfig() Config {
@@ -38,16 +39,20 @@ func Load(path string) (Config, error) {
 			}
 		} else {
 			var fileCfg struct {
-				Server  *string `json:"server,omitempty"`
-				Timeout *string `json:"timeout,omitempty"`
-				Output  *string `json:"output,omitempty"`
-				Limit   *int    `json:"limit,omitempty"`
+				Server       *string `json:"server,omitempty"`
+				SharedSecret *string `json:"shared_secret,omitempty"`
+				Timeout      *string `json:"timeout,omitempty"`
+				Output       *string `json:"output,omitempty"`
+				Limit        *int    `json:"limit,omitempty"`
 			}
 			if err := json.Unmarshal(raw, &fileCfg); err != nil {
 				return Config{}, fmt.Errorf("parse config file %q: %w", path, err)
 			}
 			if fileCfg.Server != nil {
 				cfg.Server = *fileCfg.Server
+			}
+			if fileCfg.SharedSecret != nil {
+				cfg.SharedSecret = *fileCfg.SharedSecret
 			}
 			if fileCfg.Timeout != nil {
 				if v, err := time.ParseDuration(*fileCfg.Timeout); err == nil {
@@ -64,6 +69,7 @@ func Load(path string) (Config, error) {
 	}
 
 	cfg.Server = envutil.Get("SBXCTL_SERVER", cfg.Server)
+	cfg.SharedSecret = envutil.Get("SBX_SHARED_SECRET", cfg.SharedSecret)
 	if strings.TrimSpace(cfg.Server) == "" {
 		cfg.Server = "http://127.0.0.1:8082"
 	}

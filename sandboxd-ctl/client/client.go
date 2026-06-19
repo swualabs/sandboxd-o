@@ -9,14 +9,17 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"sandboxd-o/pkg/auth"
 )
 
 type Client struct {
-	baseURL string
-	http    *http.Client
+	baseURL      string
+	sharedSecret string
+	http         *http.Client
 }
 
-func New(baseURL string, timeout time.Duration) *Client {
+func New(baseURL string, timeout time.Duration, sharedSecret string) *Client {
 	baseURL = strings.TrimSpace(baseURL)
 	baseURL = strings.TrimRight(baseURL, "/")
 	if baseURL == "" {
@@ -27,7 +30,7 @@ func New(baseURL string, timeout time.Duration) *Client {
 		timeout = 10 * time.Second
 	}
 
-	return &Client{baseURL: baseURL, http: &http.Client{Timeout: timeout}}
+	return &Client{baseURL: baseURL, sharedSecret: sharedSecret, http: &http.Client{Timeout: timeout}}
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any) (map[string]any, error) {
@@ -49,6 +52,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any) (map[str
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	auth.SetRequestSecret(req, c.sharedSecret)
 
 	res, err := c.http.Do(req)
 	if err != nil {

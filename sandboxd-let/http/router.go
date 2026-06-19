@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"sandboxd-o/pkg/auth"
 	"sandboxd-o/pkg/httplog"
 	docs "sandboxd-o/sandboxd-let/docs"
 
@@ -21,15 +22,19 @@ func newRouter(s *Server) *gin.Engine {
 	})
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerfiles.Handler, ginSwagger.InstanceName("sandboxd")))
 	r.GET("/healthz", s.healthz)
-	r.GET("/v1/node/status", s.nodeStatus)
-	r.GET("/v1/sandboxes", s.listSandboxes)
-	r.GET("/v1/sandboxes/:id", s.getSandbox)
-	r.GET("/v1/sandboxes/:id/logs", s.getSandboxLogs)
-	r.GET("/v1/sandboxes/:id/containers/:name/logs", s.getContainerLogs)
-	r.POST("/v1/sandboxes/statuses", s.sandboxStatuses)
-	r.POST("/v1/sandboxes", s.createSandbox)
-	r.DELETE("/v1/sandboxes/:id", s.deleteSandbox)
-	r.POST("/v1/reconcile", s.reconcile)
+
+	v1 := r.Group("/v1", auth.Middleware(s.sharedSecret))
+	{
+		v1.GET("/node/status", s.nodeStatus)
+		v1.GET("/sandboxes", s.listSandboxes)
+		v1.GET("/sandboxes/:id", s.getSandbox)
+		v1.GET("/sandboxes/:id/logs", s.getSandboxLogs)
+		v1.GET("/sandboxes/:id/containers/:name/logs", s.getContainerLogs)
+		v1.POST("/sandboxes/statuses", s.sandboxStatuses)
+		v1.POST("/sandboxes", s.createSandbox)
+		v1.DELETE("/sandboxes/:id", s.deleteSandbox)
+		v1.POST("/reconcile", s.reconcile)
+	}
 
 	return r
 }

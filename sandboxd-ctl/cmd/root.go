@@ -13,12 +13,13 @@ import (
 )
 
 type Options struct {
-	ConfigPath string
-	Server     string
-	Node       string
-	Timeout    time.Duration
-	Output     string
-	Limit      int
+	ConfigPath   string
+	Server       string
+	SharedSecret string
+	Node         string
+	Timeout      time.Duration
+	Output       string
+	Limit        int
 }
 
 func NewRoot() *cobra.Command {
@@ -37,6 +38,10 @@ func NewRoot() *cobra.Command {
 
 			if !cmd.Flags().Changed("server") && strings.TrimSpace(opts.Server) == "" {
 				opts.Server = cfg.Server
+			}
+
+			if strings.TrimSpace(opts.SharedSecret) == "" {
+				opts.SharedSecret = cfg.SharedSecret
 			}
 
 			if !cmd.Flags().Changed("timeout") && opts.Timeout == 10*time.Second {
@@ -69,6 +74,7 @@ func NewRoot() *cobra.Command {
 
 	cmd.PersistentFlags().StringVarP(&opts.ConfigPath, "config", "c", cfgfile.DefaultConfigPath, "path to sbxctl config json")
 	cmd.PersistentFlags().StringVar(&opts.Server, "server", "", "orchestrator base url (config file or SBXCTL_SERVER)")
+	cmd.PersistentFlags().StringVar(&opts.SharedSecret, "secret", "", "shared secret for orchestrator auth (config file or SBX_SHARED_SECRET)")
 	cmd.PersistentFlags().StringVar(&opts.Node, "node", "", "node id for proxy APIs")
 	cmd.PersistentFlags().DurationVar(&opts.Timeout, "timeout", 10*time.Second, "request timeout")
 	cmd.PersistentFlags().StringVarP(&opts.Output, "output", "o", "", "output format: json|yaml|wide")
@@ -84,7 +90,7 @@ func NewRoot() *cobra.Command {
 }
 
 func mustClient(opts *Options) *client.Client {
-	return client.New(opts.Server, opts.Timeout)
+	return client.New(opts.Server, opts.Timeout, opts.SharedSecret)
 }
 
 func withCtx(opts *Options) (context.Context, context.CancelFunc) {

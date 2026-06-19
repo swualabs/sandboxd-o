@@ -1,6 +1,7 @@
 {
     "app_env": "dev",
     "http_addr": ":8081",
+    "shared_secret": "MY_SHARED_SECRET",
     "log_dir": "/logs/sbxlet",
     "log_file_prefix": "sandboxd",
     "containerd_address": "/run/containerd/containerd.sock",
