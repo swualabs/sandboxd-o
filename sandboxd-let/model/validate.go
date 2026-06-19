@@ -32,6 +32,33 @@ func ValidateSandboxID(id string) error {
 
 var safeSandboxIDRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 var safeVolumeNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
+var safeContainerNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
+
+// ValidateContainerName enforces a strict allowlist for container names.
+//
+// The container name is used to build host-side paths (for example the per-container
+// tmpfs mount path StateBaseDir/<sandboxID>/tmpfs/<containerName>/tmp), so it must not
+// be allowed to contain path separators or traversal sequences. See issue #21.
+func ValidateContainerName(name string) error {
+	v := strings.TrimSpace(name)
+	if v == "" {
+		return fmt.Errorf("container name is required")
+	}
+
+	if v != name {
+		return fmt.Errorf("container name must not contain leading or trailing whitespace")
+	}
+
+	if strings.Contains(v, "/") || strings.Contains(v, "\\") || strings.Contains(v, "..") {
+		return fmt.Errorf("container name contains invalid path characters")
+	}
+
+	if !safeContainerNameRe.MatchString(v) {
+		return fmt.Errorf("container name contains unsupported characters")
+	}
+
+	return nil
+}
 
 func (r CreateSandboxRequest) Validate() error {
 	if err := ValidateSandboxID(r.ID); err != nil {
@@ -71,8 +98,12 @@ func (r CreateSandboxRequest) Validate() error {
 	}
 
 	for _, c := range r.Containers {
-		if c.Name == "" || c.Image == "" {
-			return fmt.Errorf("container name and image are required")
+		if err := ValidateContainerName(c.Name); err != nil {
+			return err
+		}
+
+		if c.Image == "" {
+			return fmt.Errorf("container %s: image is required", c.Name)
 		}
 
 		if strings.TrimSpace(c.Resource.CPU) == "" {

@@ -402,6 +402,30 @@ func TestCreateSandbox_RejectsInvalidSharedVolumeAndMountInputs(t *testing.T) {
 			},
 		},
 		{
+			name: "container name path traversal",
+			mutate: func(r *types.CreateSandboxObjectRequest) {
+				r.Spec.Containers[0].Name = "../../../../tmp/escape"
+			},
+		},
+		{
+			name: "container name with slash",
+			mutate: func(r *types.CreateSandboxObjectRequest) {
+				r.Spec.Containers[0].Name = "a/b"
+			},
+		},
+		{
+			name: "empty container name",
+			mutate: func(r *types.CreateSandboxObjectRequest) {
+				r.Spec.Containers[0].Name = ""
+			},
+		},
+		{
+			name: "empty container image",
+			mutate: func(r *types.CreateSandboxObjectRequest) {
+				r.Spec.Containers[0].Image = ""
+			},
+		},
+		{
 			name: "missing mount name",
 			mutate: func(r *types.CreateSandboxObjectRequest) {
 				r.Spec.Containers[0].VolumeMounts[0].Name = ""
