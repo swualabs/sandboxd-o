@@ -514,7 +514,12 @@ func (s *Service) ensureSandboxVolumeMount(sandboxID, volumeName string, bytes i
 		return "", fmt.Errorf("volume %s has unsupported name", volumeName)
 	}
 
-	base := filepath.Join(s.cfg.StateBaseDir, sandboxID, "volumes", volumeName)
+	sandboxVolumesRoot := filepath.Join(s.cfg.StateBaseDir, sandboxID, "volumes")
+	base := filepath.Join(sandboxVolumesRoot, volumeName)
+	if !isWithinBase(sandboxVolumesRoot, base) {
+		return "", fmt.Errorf("volume mount path %s escapes sandbox volumes root %s", base, sandboxVolumesRoot)
+	}
+
 	if err := os.MkdirAll(base, 0o755); err != nil {
 		return "", fmt.Errorf("mkdir volume mount path %s: %w", base, err)
 	}
@@ -543,7 +548,18 @@ func (s *Service) ensureSandboxTmpfsMount(sandboxID, containerName, kind string,
 		return "", err
 	}
 
-	base := filepath.Join(s.cfg.StateBaseDir, sandboxID, "tmpfs", containerName, kind)
+	// Defense-in-depth: the container name is part of the host mount path, so reject
+	// any traversal attempt before touching the filesystem. See issue #21.
+	if err := model.ValidateContainerName(containerName); err != nil {
+		return "", err
+	}
+
+	sandboxTmpfsRoot := filepath.Join(s.cfg.StateBaseDir, sandboxID, "tmpfs")
+	base := filepath.Join(sandboxTmpfsRoot, containerName, kind)
+	if !isWithinBase(sandboxTmpfsRoot, base) {
+		return "", fmt.Errorf("tmpfs mount path %s escapes sandbox tmpfs root %s", base, sandboxTmpfsRoot)
+	}
+
 	if err := os.MkdirAll(base, 0o755); err != nil {
 		return "", fmt.Errorf("mkdir tmpfs mount path %s: %w", base, err)
 	}
@@ -690,6 +706,24 @@ func (s *Service) cleanupSandboxVolumeMounts(sandboxID string) {
 	})
 
 	_ = os.RemoveAll(base)
+}
+
+// isWithinBase reports whether target stays inside base after lexical cleaning.
+// It is a defense-in-depth guard against path traversal in host mount paths and
+// must be evaluated before any mkdir/mount on the computed path. See issue #21.
+func isWithinBase(base, target string) bool {
+	cleanBase := filepath.Clean(base)
+	cleanTarget := filepath.Clean(target)
+	if cleanTarget == cleanBase {
+		return true
+	}
+
+	rel, err := filepath.Rel(cleanBase, cleanTarget)
+	if err != nil {
+		return false
+	}
+
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func resolvePath(path string) string {

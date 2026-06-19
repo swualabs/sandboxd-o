@@ -192,8 +192,12 @@ func validateSandboxCreate(req types.CreateSandboxObjectRequest) error {
 	}
 
 	for _, c := range req.Spec.Containers {
-		if strings.TrimSpace(c.Name) == "" || strings.TrimSpace(c.Image) == "" {
-			return fmt.Errorf("%w: container name and image are required", ErrInvalidInput)
+		if err := model.ValidateContainerName(c.Name); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidInput, err)
+		}
+
+		if strings.TrimSpace(c.Image) == "" {
+			return fmt.Errorf("%w: container %s image is required", ErrInvalidInput, c.Name)
 		}
 
 		if strings.TrimSpace(c.Resource.CPU) == "" || strings.TrimSpace(c.Resource.Memory) == "" {

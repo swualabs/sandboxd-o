@@ -413,7 +413,7 @@ A Sandbox may define sandbox-local shared ephemeral volumes through `spec.volume
   ephemeral_storage: 128Mi
 ```
 
-- `name`: The volume name. It must be unique within the sandbox.
+- `name`: The volume name. It must be unique within the sandbox. The name is used to build host-side mount paths, so it must match `^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$` (no path separators or `..`).
 
 - `ephemeral_storage`: Required size limit for the shared tmpfs volume. Once this limit is exceeded, writes return `ENOSPC`.
 

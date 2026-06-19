@@ -50,6 +50,56 @@ func TestValidate_InvalidSandboxID(t *testing.T) {
 	}
 }
 
+func TestValidateContainerName(t *testing.T) {
+	valid := []string{"c1", "app", "web-server", "a", "Cont_ainer.1"}
+	for _, name := range valid {
+		if err := ValidateContainerName(name); err != nil {
+			t.Fatalf("expected %q to be valid, got err=%v", name, err)
+		}
+	}
+
+	invalid := []string{
+		"",
+		" ",
+		"../../tmp/escape",
+		"../escape",
+		"a/b",
+		"a\\b",
+		"with..dots",
+		" leading",
+		"trailing ",
+		"-startsWithDash",
+		".startsWithDot",
+		"bad name",
+		string(make([]byte, 65)), // exceeds 64 chars
+	}
+	for _, name := range invalid {
+		if err := ValidateContainerName(name); err == nil {
+			t.Fatalf("expected %q to be rejected", name)
+		}
+	}
+}
+
+func TestValidate_ContainerNameTraversal(t *testing.T) {
+	cases := []string{
+		"../../../../tmp/escape",
+		"../escape",
+		"a/b",
+		"a\\b",
+		"with..dots",
+		" leading",
+		"trailing ",
+	}
+
+	for _, name := range cases {
+		r := validReq()
+		r.Containers[0].Name = name
+		if err := r.Validate(); err == nil {
+			t.Fatalf("expected invalid container name error for %q", name)
+		}
+	}
+}
+
 func TestValidate_PortRules(t *testing.T) {
 	r := validReq()
 	r.Ports = []PortMapping{{HostPort: 80, ContainerPort: 80, Protocol: "tcp"}}
