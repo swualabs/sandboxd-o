@@ -84,3 +84,35 @@ func TestValidateNodeInput(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestValidateNodeInput_RejectsUnsafeAndInvalid(t *testing.T) {
+	rejected := []struct {
+		name string
+		ip   string
+		port int
+	}{
+		{name: "malformed ip", ip: "not-an-ip", port: 8080},
+		{name: "unspecified ipv4", ip: "0.0.0.0", port: 8080},
+		{name: "unspecified ipv6", ip: "::", port: 8080},
+		{name: "cloud metadata link-local", ip: "169.254.169.254", port: 80},
+		{name: "ipv6 link-local", ip: "fe80::1", port: 8080},
+		{name: "multicast", ip: "224.0.0.1", port: 8080},
+		{name: "port too low", ip: "10.0.0.5", port: 0},
+		{name: "port too high", ip: "10.0.0.5", port: 70000},
+	}
+
+	for _, tc := range rejected {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateNodeInput("n", tc.ip, tc.port); err == nil {
+				t.Fatalf("expected rejection for %s (%s:%d)", tc.name, tc.ip, tc.port)
+			}
+		})
+	}
+
+	allowed := []string{"127.0.0.1", "10.89.1.10", "192.168.1.20", "198.51.100.2"}
+	for _, ip := range allowed {
+		if err := validateNodeInput("n", ip, 8080); err != nil {
+			t.Fatalf("expected %s to be allowed, got err=%v", ip, err)
+		}
+	}
+}

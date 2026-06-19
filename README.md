@@ -230,6 +230,7 @@ Flags:
       --limit int          list limit (default 100)
       --node string        node id for proxy APIs
   -o, --output string      output format: json|yaml|wide
+      --secret string      shared secret for orchestrator auth (config file or SBX_SHARED_SECRET)
       --server string      orchestrator base url (config file or SBXCTL_SERVER)
       --timeout duration   request timeout (default 10s)
 
@@ -240,6 +241,7 @@ The main available options are as follows:
 
 - `-c, --config`: Specifies the path to the sbxctl JSON configuration file. Default: `/var/lib/sandboxd/sbxctl_config.json`
 - `--server`: Specifies the base URL of the API server. This option can also be configured through the config file or the `SBXCTL_SERVER` environment variable. For example: `http://localhost:8080`
+- `--secret`: The shared secret used to authenticate to the orchestrator. This option can also be configured through the config file (`shared_secret`) or the `SBX_SHARED_SECRET` environment variable. It must match the orchestrator's `shared_secret`.
 - `--node`: Specifies the target node ID when using the Proxied API. This allows API requests to be sent directly to a specific sbxlet instance. For example: `sandboxd-node-1`
 - `-o, --output`: Specifies the output format. Available options are `json`, `yaml`, and `wide`. Table output is used by default. The `logs` command always prints raw log lines.
 
@@ -750,6 +752,20 @@ More detailed installation and usage guides will be provided in the future.
 Each binary also accepts `--config` or `-c` to use a different path.
 
 Environment variables are still supported as compatibility overrides, but they are no longer the recommended configuration mechanism.
+
+## Authentication (shared secret)
+
+`sbxorch`, `sbxlet`, and `sbxctl` authenticate every privileged HTTP call with a single static shared secret. All three components must be configured with the **same** secret value; communication only succeeds when they match.
+
+- Config field: `shared_secret` (in each component's JSON config file)
+- Environment override: `SBX_SHARED_SECRET` (applies to all three)
+- `sbxctl` additionally accepts a `--secret` flag
+
+How it works:
+
+- Outgoing requests carry the secret in an `Authorization: Bearer <secret>` header.
+- Servers reject any request to a privileged route whose token does not match, returning `401 Unauthorized`. The token is compared in constant time.
+- The public, unauthenticated routes are limited to `GET /healthz` and `/swagger/*` so health checks and API docs keep working.
 
 ## sbxlet
 

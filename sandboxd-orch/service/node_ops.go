@@ -198,7 +198,7 @@ func (s *Service) sandboxClientForNode(ctx context.Context, id string, timeout t
 		return nil, nil, err
 	}
 
-	c := client.New(n.SbxletBaseURL, timeout)
+	c := client.New(n.SbxletBaseURL, timeout, s.cfg.SharedSecret)
 	return c, n, nil
 }
 
@@ -206,7 +206,7 @@ func (s *Service) probeNode(ctx context.Context, n types.Node) {
 	probeCtx, cancel := context.WithTimeout(ctx, s.cfg.ProbeTimeout)
 	defer cancel()
 
-	c := client.New(n.SbxletBaseURL, s.cfg.ProbeTimeout)
+	c := client.New(n.SbxletBaseURL, s.cfg.ProbeTimeout, s.cfg.SharedSecret)
 	err := c.Healthz(probeCtx)
 
 	now := time.Now().UTC()
@@ -245,7 +245,7 @@ func (s *Service) syncNodeResources(ctx context.Context, n types.Node) {
 	probeCtx, cancel := context.WithTimeout(ctx, s.cfg.ProbeTimeout)
 	defer cancel()
 
-	c := client.New(n.SbxletBaseURL, s.cfg.ProbeTimeout)
+	c := client.New(n.SbxletBaseURL, s.cfg.ProbeTimeout, s.cfg.SharedSecret)
 	st, err := c.NodeStatus(probeCtx)
 	if err != nil {
 		slog.Warn("node resource sync failed", slog.String("node", n.ID), slog.Any("error", err))

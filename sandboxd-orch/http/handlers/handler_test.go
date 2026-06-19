@@ -20,10 +20,13 @@ import (
 	"sandboxd-o/sandboxd-orch/types"
 )
 
+const testSharedSecret = "test-shared-secret"
+
 func setupRouter(t *testing.T, sandboxdURL string) *httptest.Server {
 	t.Helper()
 	cfg := orcfg.Config{
 		HTTPAddr:                 ":0",
+		SharedSecret:             testSharedSecret,
 		SQLitePath:               filepath.Join(t.TempDir(), "orch.db"),
 		ProbeTimeout:             time.Second,
 		HeartbeatInterval:        5 * time.Second,
@@ -85,12 +88,58 @@ func TestRegisterNode_BadRequest(t *testing.T) {
 	r := setupRouter(t, sbx.URL)
 	defer r.Close()
 
-	resp, err := http.Post(r.URL+"/api/v1/nodes", "application/json", bytes.NewBufferString("{}"))
+	req, err := http.NewRequest(http.MethodPost, r.URL+"/api/v1/nodes", bytes.NewBufferString("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+testSharedSecret)
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("code=%d", resp.StatusCode)
+	}
+}
+
+func TestProtectedRoutes_RejectUnauthenticated(t *testing.T) {
+	sbx := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer sbx.Close()
+	r := setupRouter(t, sbx.URL)
+	defer r.Close()
+
+	cases := []struct {
+		name   string
+		header string
+	}{
+		{name: "no token", header: ""},
+		{name: "wrong token", header: "Bearer wrong-secret"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, r.URL+"/api/v1/nodes", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.header != "" {
+				req.Header.Set("Authorization", tc.header)
+			}
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("expected 401, got %d", resp.StatusCode)
+			}
+		})
 	}
 }

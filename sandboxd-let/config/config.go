@@ -34,6 +34,7 @@ const (
 type Config struct {
 	AppEnv                 string        `json:"app_env,omitempty"`
 	HTTPAddr               string        `json:"http_addr,omitempty"`
+	SharedSecret           string        `json:"shared_secret,omitempty"`
 	LogDir                 string        `json:"log_dir,omitempty"`
 	LogFilePrefix          string        `json:"log_file_prefix,omitempty"`
 	ContainerdAddress      string        `json:"containerd_address,omitempty"`
@@ -117,6 +118,7 @@ func loadFile(path string, cfg *Config) error {
 func applyEnvOverrides(cfg *Config) {
 	cfg.AppEnv = envutil.Get("APP_ENV", cfg.AppEnv)
 	cfg.HTTPAddr = envutil.Get("HTTP_ADDR", cfg.HTTPAddr)
+	cfg.SharedSecret = envutil.Get("SBX_SHARED_SECRET", cfg.SharedSecret)
 	cfg.LogDir = envutil.Get("SANDBOX_LOG_DIR", cfg.LogDir)
 	cfg.LogFilePrefix = envutil.Get("SANDBOX_LOG_FILE_PREFIX", cfg.LogFilePrefix)
 	cfg.ContainerdAddress = envutil.Get("SANDBOX_CONTAINERD_ADDRESS", cfg.ContainerdAddress)
@@ -255,6 +257,7 @@ func csvEnvOrDefault(key string, def []string) []string {
 type sbxletFileConfig struct {
 	AppEnv                  *string  `json:"app_env,omitempty"`
 	HTTPAddr                *string  `json:"http_addr,omitempty"`
+	SharedSecret            *string  `json:"shared_secret,omitempty"`
 	LogDir                  *string  `json:"log_dir,omitempty"`
 	LogFilePrefix           *string  `json:"log_file_prefix,omitempty"`
 	ContainerdAddress       *string  `json:"containerd_address,omitempty"`
@@ -281,6 +284,7 @@ type sbxletFileConfig struct {
 func (f sbxletFileConfig) apply(cfg *Config) {
 	assignString(&cfg.AppEnv, f.AppEnv)
 	assignString(&cfg.HTTPAddr, f.HTTPAddr)
+	assignString(&cfg.SharedSecret, f.SharedSecret)
 	assignString(&cfg.LogDir, f.LogDir)
 	assignString(&cfg.LogFilePrefix, f.LogFilePrefix)
 	assignString(&cfg.ContainerdAddress, f.ContainerdAddress)

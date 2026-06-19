@@ -41,6 +41,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	if strings.TrimSpace(cfg.SharedSecret) == "" {
+		boot := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+		boot.Error("orchestrator refuses to start: shared_secret is not configured (set shared_secret in config or SBX_SHARED_SECRET)")
+		os.Exit(1)
+	}
+
 	logger, err := logging.New(logging.Config{
 		Dir:        cfg.LogDir,
 		FilePrefix: valueOrDefault(cfg.LogFilePrefix, "orchestrator"),

@@ -7,13 +7,15 @@ import (
 )
 
 type Client struct {
-	httpClient *http.Client
-	baseURL    string
+	httpClient   *http.Client
+	baseURL      string
+	sharedSecret string
 }
 
-func New(baseURL string, timeout time.Duration) *Client {
+func New(baseURL string, timeout time.Duration, sharedSecret string) *Client {
 	return &Client{
-		httpClient: &http.Client{Timeout: timeout},
-		baseURL:    strings.TrimRight(baseURL, "/"),
+		httpClient:   &http.Client{Timeout: timeout},
+		baseURL:      strings.TrimRight(baseURL, "/"),
+		sharedSecret: sharedSecret,
 	}
 }

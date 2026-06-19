@@ -1,6 +1,7 @@
 {
     "app_env": "dev",
     "http_addr": ":8082",
+    "shared_secret": "MY_SHARED_SECRET",
     "log_dir": "/logs/sbxorch",
     "log_file_prefix": "orchestrator",
     "sqlite_path": "/var/lib/sandboxd/orchestrator.db",

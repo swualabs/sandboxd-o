@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"sandboxd-o/pkg/auth"
 )
 
 func (c *Client) do(ctx context.Context, method, path string, body any) (map[string]any, error) {
@@ -41,6 +43,7 @@ func (c *Client) doInto(ctx context.Context, method, path string, body any, out 
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	auth.SetRequestSecret(req, c.sharedSecret)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
