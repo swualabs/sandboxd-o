@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-DEFAULT_ARTICLES_ZIP_URL="https://github.com/swualabs/sandboxd-o/releases/download/v0.2.0/articles.zip"
+DEFAULT_ARTICLES_ZIP_URL="https://github.com/swualabs/sandboxd-o/releases/download/v0.3.0/articles.zip"
 
 ARTICLES_ZIP_URL="${ARTICLES_ZIP_URL:-$DEFAULT_ARTICLES_ZIP_URL}"
 APP_ROOT="${APP_ROOT:-/opt/sandboxd-o}"
@@ -63,7 +63,7 @@ Examples:
   sudo bash prepare-sandboxd-o-ami.sh sbxlet
   sudo bash prepare-sandboxd-o-ami.sh sbxorch
   sudo START_SERVICE=false bash prepare-sandboxd-o-ami.sh sbxlet
-  sudo ARTICLES_ZIP_URL=https://github.com/swualabs/sandboxd-o/releases/download/v0.2.0/articles.zip bash prepare-sandboxd-o-ami.sh sbxlet
+  sudo ARTICLES_ZIP_URL=https://github.com/swualabs/sandboxd-o/releases/download/v0.3.0/articles.zip bash prepare-sandboxd-o-ami.sh sbxlet
 EOF
 }
 
