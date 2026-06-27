@@ -2,6 +2,7 @@ package orchestrate
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"sandboxd-o/sandboxd-adm/stepper"
@@ -36,8 +37,8 @@ func (r *rollbackStack) run(s *stepper.Stepper) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	for i := len(r.actions) - 1; i >= 0; i-- {
-		a := r.actions[i]
+	for _, a := range slices.Backward(r.actions) {
+
 		if err := a.fn(ctx); err != nil {
 			s.Warn("rollback step failed (%s): %v", a.desc, err)
 			continue

@@ -3,6 +3,7 @@ package userdata
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 )
 
@@ -19,9 +20,7 @@ func MergeConfig(component, overridePath, sharedSecret string, dynamicDefaults m
 		return "", fmt.Errorf("parse default %s config: %w", component, err)
 	}
 
-	for k, v := range dynamicDefaults {
-		base[k] = v
-	}
+	maps.Copy(base, dynamicDefaults)
 
 	if overridePath != "" {
 		raw, err := os.ReadFile(overridePath)
@@ -32,9 +31,7 @@ func MergeConfig(component, overridePath, sharedSecret string, dynamicDefaults m
 		if err := json.Unmarshal(raw, &override); err != nil {
 			return "", fmt.Errorf("parse override config %q: %w", overridePath, err)
 		}
-		for k, v := range override {
-			base[k] = v
-		}
+		maps.Copy(base, override)
 	}
 
 	if sharedSecret != "" {

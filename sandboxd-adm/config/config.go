@@ -63,13 +63,13 @@ func loadEnvFile(path string) error {
 		}
 		line = strings.TrimPrefix(line, "export ")
 
-		idx := strings.Index(line, "=")
-		if idx < 0 {
+		before, after, ok := strings.Cut(line, "=")
+		if !ok {
 			continue
 		}
 
-		key := strings.TrimSpace(line[:idx])
-		val := strings.TrimSpace(line[idx+1:])
+		key := strings.TrimSpace(before)
+		val := strings.TrimSpace(after)
 		val = unquote(val)
 
 		if key == "" {

@@ -13,12 +13,12 @@ import (
 	"sandboxd-o/sandboxd-ctl/client"
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 )
 
 const defaultWorkerRootVolumeGiB = 64
 
-// CreateWorkerInput mirrors `sbxadm create worker` flags.
 type CreateWorkerInput struct {
 	Name         string
 	Version      string
@@ -28,14 +28,20 @@ type CreateWorkerInput struct {
 	External     string // optional hostname; defaults to the worker's EIP when left empty
 	PublicEIP    string // ARN or allocation id; empty means "auto-allocate a managed EIP"
 	ConfigPath   string // optional JSON overrides file
+	ECRRepos     string // comma-separated ECR repo name patterns to grant pull access to, e.g. "my-repo-1,ctf-*"
 	OrchServer   string // explicit orch base URL override (SBXADM_ORCH_SERVER)
 	OrchTimeout  time.Duration
 }
 
-func CreateWorker(ctx context.Context, ec2c *ec2.Client, ssmc *ssm.Client, st *store.Store, in CreateWorkerInput, s *stepper.Stepper) error {
+func CreateWorker(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc *ssm.Client, st *store.Store, accountID string, in CreateWorkerInput, s *stepper.Stepper) error {
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
 		return fmt.Errorf("worker name is required")
+	}
+
+	newECRPatterns, err := awsx.ParseECRRepoPatterns(in.ECRRepos)
+	if err != nil {
+		return fmt.Errorf("--ecr-repos: %w", err)
 	}
 
 	s.Step("loading cluster %q", in.ClusterName)
@@ -61,6 +67,17 @@ func CreateWorker(ctx context.Context, ec2c *ec2.Client, ssmc *ssm.Client, st *s
 		if err != nil {
 			return fmt.Errorf("--root-volume-size: %w", err)
 		}
+	}
+
+	mergedECRPatterns := cluster.WorkerECRRepoPatterns
+	if len(newECRPatterns) > 0 {
+		mergedECRPatterns = awsx.MergeECRRepoPatterns(cluster.WorkerECRRepoPatterns, newECRPatterns)
+		s.Step("granting ECR pull access for repositories: %v", mergedECRPatterns)
+		workerRoleBase := fmt.Sprintf("sbxcluster-%s-worker", in.ClusterName)
+		if err := awsx.PutECRPullPolicy(ctx, iamc, workerRoleBase, cluster.Region, accountID, mergedECRPatterns); err != nil {
+			return fmt.Errorf("grant ecr pull access: %w", err)
+		}
+		s.Done("ECR pull allowlist updated for cluster %q (shared by all its workers)", in.ClusterName)
 	}
 
 	var eipAllocID string
@@ -228,6 +245,7 @@ func CreateWorker(ctx context.Context, ec2c *ec2.Client, ssmc *ssm.Client, st *s
 	}
 
 	cluster.Workers = append(cluster.Workers, worker)
+	cluster.WorkerECRRepoPatterns = mergedECRPatterns
 	cluster.UpdatedAt = now
 
 	s.Step("persisting worker state to DynamoDB")

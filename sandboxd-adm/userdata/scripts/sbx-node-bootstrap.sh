@@ -280,6 +280,75 @@ run_install_sh_if_needed() {
     fi
 }
 
+setup_ecr_auto_login() {
+    if [[ "$COMPONENT" != "sbxlet" ]]; then
+        return
+    fi
+
+    log "Configuring automatic ECR registry auth for containerd"
+
+    if ! command -v aws >/dev/null 2>&1; then
+        DEBIAN_FRONTEND=noninteractive apt-get install -y awscli >/dev/null
+    fi
+
+    # containerd only reads registry auth from its single config.toml at
+    # startup; splitting it into conf.d/*.toml lets the refresh timer below
+    # update just the ECR auth block without regenerating the whole file
+    # install.sh wrote.
+    if ! grep -q '^imports = \["/etc/containerd/conf.d/\*\.toml"\]' /etc/containerd/config.toml 2>/dev/null; then
+        sed -i '1i imports = ["/etc/containerd/conf.d/*.toml"]' /etc/containerd/config.toml
+    fi
+    mkdir -p /etc/containerd/conf.d
+
+    local region
+    region="$(curl -fsS -m 3 -H "X-aws-ec2-metadata-token: $(curl -fsS -m 3 -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' http://169.254.169.254/latest/api/token)" http://169.254.169.254/latest/meta-data/placement/region)"
+    [[ -n "$region" ]] || die "could not resolve region from instance metadata for ECR auto-login"
+
+    cat >/usr/local/bin/sbxadm-ecr-refresh.sh <<SCRIPT
+#!/bin/bash
+set -euo pipefail
+REGION="${region}"
+ACCOUNT_ID="\$(aws sts get-caller-identity --region "\${REGION}" --query Account --output text)"
+TOKEN="\$(aws ecr get-login-password --region "\${REGION}")"
+HOST="\${ACCOUNT_ID}.dkr.ecr.\${REGION}.amazonaws.com"
+
+cat >/etc/containerd/conf.d/ecr.toml <<EOF
+[plugins."io.containerd.grpc.v1.cri".registry.configs."\${HOST}".auth]
+  username = "AWS"
+  password = "\${TOKEN}"
+EOF
+chmod 0600 /etc/containerd/conf.d/ecr.toml
+
+systemctl restart containerd
+SCRIPT
+    chmod 0700 /usr/local/bin/sbxadm-ecr-refresh.sh
+
+    cat >/etc/systemd/system/sbxadm-ecr-refresh.service <<'EOF'
+[Unit]
+Description=Refresh ECR registry auth for containerd
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/sbxadm-ecr-refresh.sh
+EOF
+
+    cat >/etc/systemd/system/sbxadm-ecr-refresh.timer <<'EOF'
+[Unit]
+Description=Periodic ECR registry auth refresh for containerd
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=6h
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable --now sbxadm-ecr-refresh.timer
+    /usr/local/bin/sbxadm-ecr-refresh.sh
+}
+
 write_systemd_service() {
     local service_path="${SYSTEMD_DIR}/${COMPONENT}.service"
     local binary_path="${APP_DIR}/${COMPONENT}"
@@ -395,6 +464,7 @@ main() {
     install_articles "$src_dir" "$scripts_dir"
     install_default_configs "$configs_dir"
     run_install_sh_if_needed
+    setup_ecr_auto_login
     verify_binary
     write_systemd_service
     start_and_verify_service

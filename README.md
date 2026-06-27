@@ -33,9 +33,11 @@
         - [Environment Configuration](#environment-configuration)
         - [Cluster/Control Plane Creation](#clustercontrol-plane-creation)
         - [Worker Node Creation](#worker-node-creation)
+        - [Private ECR Pull Allowlist](#private-ecr-pull-allowlist)
         - [Security Model](#security-model)
         - [Cluster/Worker Info and Refreshing the sbxctl Config](#clusterworker-info-and-refreshing-the-sbxctl-config)
         - [Cluster/Worker Deletion](#clusterworker-deletion)
+        - [Example Creation of a Cluster and Worker Node](#example-creation-of-a-cluster-and-worker-node)
 - [Resource Model/Objects](#resource-modelobjects)
     - [Node](#node)
     - [External](#external)
@@ -345,7 +347,25 @@ sbxadm create worker my-worker-1 \
 
 Worker nodes always land in a public subnet, round-robined across the cluster's public subnets. If `--public-eip` is omitted, the worker's Elastic IP is also allocated and managed automatically, same as the control plane; if `--external` is omitted, that Elastic IP's address is registered as the External value automatically.
 
+If you do pass a hostname to `--external` (like `host1.example.com` above) instead of letting it default to the worker's IP, `sbxadm` only registers that value with the orchestrator — it does not create or manage any DNS record. You're responsible for pointing an A record at the worker's actual public IP (from `sbxadm info worker`) at your DNS provider yourself; see the note under [External](#external) below.
+
 Once the instance finishes bootstrapping (including installing gVisor/containerd) and passes the `sbxlet.service` health check, `sbxadm` automatically registers a Node object (and an External object, if applicable) with the sbxorch API. Deleting a worker tears down those Node/External objects along with terminating the EC2 instance.
+
+### Private ECR Pull Allowlist
+
+```shell
+sbxadm create worker my-worker-2 \
+  --cluster my-cluster \
+  --version 0.3.0 \
+  --instance t3.xlarge \
+  --ecr-repos "my-repo-1,ctf-*"
+```
+
+`--ecr-repos` grants the cluster's worker nodes pull-only access to private ECR repositories whose name matches any of the given comma-separated patterns. Patterns may mix exact names and `*` globs freely (e.g. `my-repo-1,ctf-*,other-*`); `*` is matched natively by IAM resource ARNs, so no expansion happens on the sbxadm side.
+
+All workers in a cluster share a single IAM role, so the allowlist is cluster-wide rather than per-worker: each `--ecr-repos` call merges its patterns into the cluster's existing allowlist (stored in DynamoDB) and rewrites the role's inline policy with the full, unioned set — it never removes access previously granted to other workers in the same cluster. The current allowlist is shown in `sbxadm info cluster`.
+
+On the instance side, `sbxadm`'s worker bootstrap installs the AWS CLI and a systemd timer that refreshes containerd's registry auth for the account's ECR host every 6 hours via `aws ecr get-login-password`, using the worker's own IAM role credentials — no static credentials are ever stored on the instance. Repositories that don't match any granted pattern fail to pull with a `403 Forbidden` from ECR, enforced entirely by IAM.
 
 ### Security Model
 
@@ -382,6 +402,156 @@ sbxadm delete cluster my-cluster
 ```
 
 `delete cluster` tears down every worker node first, then the control plane, security groups, IAM instance profiles, any auto-allocated Elastic IPs, and finally the DynamoDB record. Deleting a cluster or worker that's already gone from AWS returns an error.
+
+### Example Creation of a Cluster and Worker Node
+
+A complete, end-to-end walkthrough: provisioning the VPC `sbxadm` will deploy into entirely by hand with the AWS CLI (`sbxadm` itself never touches VPC/subnet/NAT/IGW resources — it only validates them), then creating a cluster and worker node, inspecting them, and tearing everything down again.
+
+#### 1. Create a VPC with Public/Private Subnets and a NAT Gateway
+
+`sbxadm` requires at least one public and one private subnet. A private control plane (no `--orch-public-endpoint`) additionally requires a NAT gateway reachable from that private subnet — `sbxadm` checks for this up front and refuses to create anything if it's missing (see [Cluster/Control Plane Creation](#clustercontrol-plane-creation)). This example sets one up regardless, since the worker's host-port range still needs the public subnet's route to an internet gateway.
+
+```shell
+REGION=ap-northeast-2
+
+VPC_ID=$(aws ec2 create-vpc --cidr-block 10.80.0.0/16 --region $REGION \
+  --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=sbxadm-demo-vpc}]' \
+  --query 'Vpc.VpcId' --output text)
+
+aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-support --region $REGION
+aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-hostnames --region $REGION
+
+PUB_SUBNET=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.80.1.0/24 \
+  --availability-zone ${REGION}a --region $REGION \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=sbxadm-demo-public}]' \
+  --query 'Subnet.SubnetId' --output text)
+
+PRIV_SUBNET=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.80.2.0/24 \
+  --availability-zone ${REGION}a --region $REGION \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=sbxadm-demo-private}]' \
+  --query 'Subnet.SubnetId' --output text)
+
+aws ec2 modify-subnet-attribute --subnet-id $PUB_SUBNET --map-public-ip-on-launch --region $REGION
+```
+
+Attach an internet gateway and route the public subnet's traffic through it:
+
+```shell
+IGW_ID=$(aws ec2 create-internet-gateway --region $REGION \
+  --tag-specifications 'ResourceType=internet-gateway,Tags=[{Key=Name,Value=sbxadm-demo-igw}]' \
+  --query 'InternetGateway.InternetGatewayId' --output text)
+aws ec2 attach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID --region $REGION
+
+PUB_RTB=$(aws ec2 create-route-table --vpc-id $VPC_ID --region $REGION \
+  --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=sbxadm-demo-public-rtb}]' \
+  --query 'RouteTable.RouteTableId' --output text)
+aws ec2 create-route --route-table-id $PUB_RTB --destination-cidr-block 0.0.0.0/0 --gateway-id $IGW_ID --region $REGION
+aws ec2 associate-route-table --route-table-id $PUB_RTB --subnet-id $PUB_SUBNET --region $REGION
+```
+
+Allocate an Elastic IP for the NAT gateway, create the NAT gateway in the public subnet, and route the private subnet's egress through it:
+
+```shell
+NAT_EIP_ALLOC=$(aws ec2 allocate-address --domain vpc --region $REGION \
+  --tag-specifications 'ResourceType=elastic-ip,Tags=[{Key=Name,Value=sbxadm-demo-nat-eip}]' \
+  --query 'AllocationId' --output text)
+
+NAT_GW_ID=$(aws ec2 create-nat-gateway --subnet-id $PUB_SUBNET --allocation-id $NAT_EIP_ALLOC --region $REGION \
+  --query 'NatGateway.NatGatewayId' --output text)
+aws ec2 wait nat-gateway-available --nat-gateway-ids $NAT_GW_ID --region $REGION
+
+PRIV_RTB=$(aws ec2 create-route-table --vpc-id $VPC_ID --region $REGION \
+  --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=sbxadm-demo-private-rtb}]' \
+  --query 'RouteTable.RouteTableId' --output text)
+aws ec2 create-route --route-table-id $PRIV_RTB --destination-cidr-block 0.0.0.0/0 --nat-gateway-id $NAT_GW_ID --region $REGION
+aws ec2 associate-route-table --route-table-id $PRIV_RTB --subnet-id $PRIV_SUBNET --region $REGION
+```
+
+At this point `$VPC_ID`, `$PUB_SUBNET`, and `$PRIV_SUBNET` are everything `sbxadm` needs.
+
+#### 2. (Optional) Pre-allocate a Stable Elastic IP for the Control Plane
+
+Without `--orch-public-eip`, `sbxadm` allocates and manages its own Elastic IP automatically — which is enough for most use cases and is what the rest of this walkthrough uses. If you instead want to reuse a specific, pre-existing Elastic IP (e.g. one already allow-listed somewhere external), allocate it yourself and pass its allocation id or ARN; `sbxadm` will only ever associate/disassociate it, never release it, since it didn't create it:
+
+```shell
+ORCH_EIP_ALLOC=$(aws ec2 allocate-address --domain vpc --region $REGION \
+  --tag-specifications 'ResourceType=elastic-ip,Tags=[{Key=Name,Value=sbxadm-demo-orch-eip}]' \
+  --query 'AllocationId' --output text)
+echo "$ORCH_EIP_ALLOC"
+```
+
+#### 3. Create the Cluster
+
+```shell
+sbxadm create cluster my-cluster \
+  --version 0.3.0 \
+  --vpc-id "$VPC_ID" \
+  --public-subnet "$PUB_SUBNET" \
+  --private-subnet "$PRIV_SUBNET" \
+  --region "$REGION" \
+  --orch-instance t3.xlarge \
+  --orch-public-endpoint \
+  --orch-public-eip "$ORCH_EIP_ALLOC" \
+  --orch-root-volume-size 16Gi
+```
+
+Drop `--orch-public-eip "$ORCH_EIP_ALLOC"` entirely to let `sbxadm` allocate and manage the control plane's Elastic IP itself instead (the simpler, recommended default). This step blocks until `sbxorch.service`'s `/healthz` check passes over SSM before returning — see [Security Model](#security-model).
+
+#### 4. Create a Worker Node
+
+```shell
+sbxadm create worker my-worker-1 \
+  --cluster my-cluster \
+  --version 0.3.0 \
+  --instance t3.xlarge \
+  --root-volume-size 64Gi \
+  --ecr-repos "my-repo-1,ctf-*" \
+  --external host1.example.com
+```
+
+As with the control plane, omitting `--public-eip` lets `sbxadm` allocate and manage the worker's Elastic IP automatically. This also blocks until `sbxlet.service` is healthy, then registers the worker as a Node (and an External object, since `--external` was given) with the orchestrator automatically.
+
+`--external host1.example.com` only registers that hostname with the orchestrator; it doesn't create the DNS record itself. After this step, look up the worker's public IP via `sbxadm info worker my-worker-1 --cluster my-cluster` and add an A record for `host1.example.com` pointing to it at your DNS provider.
+
+#### 5. Inspect and Manage
+
+```shell
+sbxadm info cluster my-cluster
+sbxadm info worker my-worker-1 --cluster my-cluster
+
+# Refresh sbxctl_config.json on the control plane so an operator can SSM into it
+# and run sbxctl directly, without hand-editing that file.
+sbxadm update-sbxctl-config my-cluster
+```
+
+#### 6. Clean Up
+
+```shell
+sbxadm delete worker my-worker-1 --cluster my-cluster
+sbxadm delete cluster my-cluster
+```
+
+This terminates both EC2 instances, deletes the security groups and IAM instance profiles, and releases any Elastic IPs `sbxadm` itself allocated (an `--orch-public-eip`/`--public-eip` you supplied is only disassociated, never released). It does **not** touch the VPC/subnets/NAT gateway/IGW from step 1, since `sbxadm` never created them:
+
+```shell
+aws ec2 release-address --allocation-id "$ORCH_EIP_ALLOC" --region $REGION  # only if you allocated this in step 2
+
+aws ec2 delete-nat-gateway --nat-gateway-id $NAT_GW_ID --region $REGION
+aws ec2 wait nat-gateway-deleted --nat-gateway-ids $NAT_GW_ID --region $REGION
+aws ec2 release-address --allocation-id $NAT_EIP_ALLOC --region $REGION
+
+aws ec2 disassociate-route-table --association-id $(aws ec2 describe-route-tables --region $REGION --route-table-ids $PRIV_RTB --query 'RouteTables[0].Associations[0].RouteTableAssociationId' --output text) --region $REGION
+aws ec2 delete-route-table --route-table-id $PRIV_RTB --region $REGION
+aws ec2 disassociate-route-table --association-id $(aws ec2 describe-route-tables --region $REGION --route-table-ids $PUB_RTB --query 'RouteTables[0].Associations[0].RouteTableAssociationId' --output text) --region $REGION
+aws ec2 delete-route-table --route-table-id $PUB_RTB --region $REGION
+
+aws ec2 detach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID --region $REGION
+aws ec2 delete-internet-gateway --internet-gateway-id $IGW_ID --region $REGION
+
+aws ec2 delete-subnet --subnet-id $PUB_SUBNET --region $REGION
+aws ec2 delete-subnet --subnet-id $PRIV_SUBNET --region $REGION
+aws ec2 delete-vpc --vpc-id $VPC_ID --region $REGION
+```
 
 # Resource Model / Objects
 
@@ -449,6 +619,10 @@ spec:
 The `node_id` field specifies the ID of the Node referenced by this External resource, and the `external` field represents the externally reachable endpoint associated with that node.
 
 If this object is not configured, the accessible Public IP address or hostname for that node will be displayed as `(none)`.
+
+> [!NOTE]
+>
+> Registering a hostname (instead of a raw IP) as `external` is purely informational — sandboxd-o does not manage DNS for you. If you set `external` to a domain name, you must separately create an A record for it at your external DNS provider, pointing to that node's actual public IP. Until that A record exists and propagates, the hostname won't actually resolve to the node, even though it's correctly registered here.
 
 ```shell
 > sbxctl get external

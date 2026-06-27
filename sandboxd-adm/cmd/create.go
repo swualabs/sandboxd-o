@@ -103,9 +103,14 @@ func newCreateWorkerCommand(opts *Options) *cobra.Command {
 				return err
 			}
 
+			accountID, err := c.AccountID(ctx)
+			if err != nil {
+				return err
+			}
+
 			s := stepper.New()
 			s.Step("creating worker %q in cluster %q", in.Name, in.ClusterName)
-			if err := orchestrate.CreateWorker(ctx, c.EC2, c.SSM, st, in, s); err != nil {
+			if err := orchestrate.CreateWorker(ctx, c.EC2, c.IAM, c.SSM, st, accountID, in, s); err != nil {
 				s.Fail("create worker %q: %v", in.Name, err)
 				return err
 			}
@@ -122,6 +127,7 @@ func newCreateWorkerCommand(opts *Options) *cobra.Command {
 	cmd.Flags().StringVar(&in.External, "external", "", "external hostname; defaults to the worker's own Elastic IP when left empty")
 	cmd.Flags().StringVar(&in.PublicEIP, "public-eip", "", "existing Elastic IP ARN or allocation id; without it, sbxadm allocates and manages its own EIP automatically")
 	cmd.Flags().StringVar(&in.ConfigPath, "config", "", "JSON file overriding sbxlet_config.json defaults (only changed keys need to be present)")
+	cmd.Flags().StringVar(&in.ECRRepos, "ecr-repos", "", "comma-separated private ECR repository name patterns to grant pull access to, e.g. \"my-repo-1,ctf-*\"; wildcards allowed, applies to every worker in the cluster")
 
 	return cmd
 }

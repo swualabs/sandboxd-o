@@ -78,10 +78,7 @@ func RunShellCommand(ctx context.Context, c *ssm.Client, instanceID string, comm
 // instance via SSM, so it works regardless of whether the node has a
 // public IP.
 func WaitForLocalHealthz(ctx context.Context, c *ssm.Client, instanceID string, port int, timeout time.Duration) error {
-	deadlineSecs := int(timeout.Seconds())
-	if deadlineSecs < 30 {
-		deadlineSecs = 30
-	}
+	deadlineSecs := max(int(timeout.Seconds()), 30)
 
 	// POSIX sh (not bash) is what AWS-RunShellScript actually executes on
 	// Ubuntu (/bin/sh -> dash), so this must not rely on bash-only

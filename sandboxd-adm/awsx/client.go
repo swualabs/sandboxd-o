@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
 type Clients struct {
@@ -18,7 +19,17 @@ type Clients struct {
 	DynamoDB *dynamodb.Client
 	IAM      *iam.Client
 	SSM      *ssm.Client
+	STS      *sts.Client
 	Region   string
+}
+
+func (c *Clients) AccountID(ctx context.Context) (string, error) {
+	out, err := c.STS.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+	if err != nil {
+		return "", fmt.Errorf("get caller identity: %w", err)
+	}
+
+	return aws.ToString(out.Account), nil
 }
 
 func ResolveDefaultRegion(ctx context.Context, profile string) (string, error) {
@@ -73,6 +84,7 @@ func NewClients(ctx context.Context, profile, region string) (*Clients, error) {
 		DynamoDB: dynamodb.NewFromConfig(cfg),
 		IAM:      iam.NewFromConfig(cfg),
 		SSM:      ssm.NewFromConfig(cfg),
+		STS:      sts.NewFromConfig(cfg),
 		Region:   region,
 	}, nil
 }

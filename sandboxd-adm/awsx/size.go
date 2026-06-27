@@ -26,10 +26,7 @@ func ParseSizeGiB(raw string) (int32, error) {
 			return 0, err
 		}
 
-		gib := v / 1024
-		if gib < 1 {
-			gib = 1
-		}
+		gib := max(v/1024, 1)
 
 		return gib, nil
 	default:

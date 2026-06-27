@@ -19,6 +19,11 @@ type Cluster struct {
 	ControlPlaneInstanceProfile string `dynamodbav:"control_plane_instance_profile,omitempty"`
 	WorkerInstanceProfile       string `dynamodbav:"worker_instance_profile,omitempty"`
 
+	// Union of every --ecr-repos pattern granted so far, so a new
+	// create-worker call can extend the shared worker role's allowlist
+	// instead of clobbering it.
+	WorkerECRRepoPatterns []string `dynamodbav:"worker_ecr_repo_patterns,omitempty"`
+
 	ControlPlane ControlPlane `dynamodbav:"control_plane"`
 	Workers      []Worker     `dynamodbav:"workers"`
 }

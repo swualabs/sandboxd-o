@@ -30,7 +30,6 @@ const (
 	letHealthTimeout  = 10 * time.Minute // sbxlet also installs gVisor/containerd, slower
 )
 
-// CreateClusterInput mirrors `sbxadm create cluster` flags.
 type CreateClusterInput struct {
 	Name               string
 	Version            string

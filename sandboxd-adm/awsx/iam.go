@@ -2,6 +2,7 @@ package awsx
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -101,8 +102,72 @@ func DeleteInstanceProfile(ctx context.Context, c *iam.Client, name string, extr
 		}
 	}
 
+	if err := DeleteECRPullPolicy(ctx, c, name); err != nil {
+		return err
+	}
+
 	if _, err := c.DeleteRole(ctx, &iam.DeleteRoleInput{RoleName: aws.String(roleName)}); err != nil && !isIAMNotFound(err) {
 		return fmt.Errorf("delete role %q: %w", roleName, err)
+	}
+
+	return nil
+}
+
+const ecrPullPolicyName = "ecr-pull-allowlist"
+
+func PutECRPullPolicy(ctx context.Context, c *iam.Client, name, region, accountID string, patterns []string) error {
+	roleName := name + "-role"
+
+	// IAM resource ARNs match '*' as a glob natively, so patterns like
+	// "ctf-*" pass straight through with no expansion needed here.
+	resources := make([]string, 0, len(patterns))
+	for _, p := range patterns {
+		resources = append(resources, fmt.Sprintf("arn:aws:ecr:%s:%s:repository/%s", region, accountID, p))
+	}
+
+	doc, err := json.Marshal(map[string]any{
+		"Version": "2012-10-17",
+		"Statement": []map[string]any{
+			{
+				"Sid":      "ECRAuthToken",
+				"Effect":   "Allow",
+				"Action":   []string{"ecr:GetAuthorizationToken"},
+				"Resource": "*",
+			},
+			{
+				"Sid":    "ECRPullAllowlist",
+				"Effect": "Allow",
+				"Action": []string{
+					"ecr:BatchCheckLayerAvailability",
+					"ecr:BatchGetImage",
+					"ecr:GetDownloadUrlForLayer",
+				},
+				"Resource": resources,
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("marshal ecr pull policy: %w", err)
+	}
+
+	if _, err := c.PutRolePolicy(ctx, &iam.PutRolePolicyInput{
+		RoleName:       aws.String(roleName),
+		PolicyName:     aws.String(ecrPullPolicyName),
+		PolicyDocument: aws.String(string(doc)),
+	}); err != nil {
+		return fmt.Errorf("put ecr pull policy on role %q: %w", roleName, err)
+	}
+
+	return nil
+}
+
+func DeleteECRPullPolicy(ctx context.Context, c *iam.Client, name string) error {
+	roleName := name + "-role"
+	if _, err := c.DeleteRolePolicy(ctx, &iam.DeleteRolePolicyInput{
+		RoleName:   aws.String(roleName),
+		PolicyName: aws.String(ecrPullPolicyName),
+	}); err != nil && !isIAMNotFound(err) {
+		return fmt.Errorf("delete ecr pull policy on role %q: %w", roleName, err)
 	}
 
 	return nil

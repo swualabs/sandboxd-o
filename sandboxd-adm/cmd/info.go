@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"sandboxd-o/sandboxd-adm/color"
 	"sandboxd-o/sandboxd-adm/store"
@@ -131,6 +132,11 @@ func printClusterInfo(cmd *cobra.Command, c *store.Cluster) {
 	fmt.Fprintf(out, "Cluster Control Plane / Config (JSON):\n%s\n", indent(cp.ConfigJSON))
 	fmt.Fprintln(out)
 
+	if len(c.WorkerECRRepoPatterns) > 0 {
+		fmt.Fprintf(out, "Cluster Worker ECR Pull Allowlist:      %v\n", c.WorkerECRRepoPatterns)
+		fmt.Fprintln(out)
+	}
+
 	if len(c.Workers) == 0 {
 		fmt.Fprintln(out, "Cluster Worker Nodes: (none)")
 		return
@@ -181,12 +187,13 @@ func indent(jsonStr string) string {
 	if jsonStr == "" {
 		return "  (default)"
 	}
-	out := "  "
+	var out strings.Builder
+	out.WriteString("  ")
 	for _, r := range jsonStr {
-		out += string(r)
+		out.WriteString(string(r))
 		if r == '\n' {
-			out += "  "
+			out.WriteString("  ")
 		}
 	}
-	return out
+	return out.String()
 }
