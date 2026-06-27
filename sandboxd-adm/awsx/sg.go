@@ -22,13 +22,16 @@ type IngressRule struct {
 }
 
 func EnsureSecurityGroup(ctx context.Context, c *ec2.Client, vpcID, name, description string, rules []IngressRule) (string, error) {
-	existing, err := findSecurityGroupByName(ctx, c, vpcID, name)
+	existing, managed, err := findSecurityGroupByName(ctx, c, vpcID, name)
 	if err != nil {
 		return "", err
 	}
 
 	var sgID string
 	if existing != "" {
+		if !managed {
+			return "", fmt.Errorf("security group %q already exists in vpc %q but is not managed by sbxadm (missing ManagedBy=sbxadm tag); refusing to take it over", name, vpcID)
+		}
 		sgID = existing
 	} else {
 		out, err := c.CreateSecurityGroup(ctx, &ec2.CreateSecurityGroupInput{
@@ -56,7 +59,7 @@ func EnsureSecurityGroup(ctx context.Context, c *ec2.Client, vpcID, name, descri
 	return sgID, nil
 }
 
-func findSecurityGroupByName(ctx context.Context, c *ec2.Client, vpcID, name string) (string, error) {
+func findSecurityGroupByName(ctx context.Context, c *ec2.Client, vpcID, name string) (id string, managed bool, err error) {
 	out, err := c.DescribeSecurityGroups(ctx, &ec2.DescribeSecurityGroupsInput{
 		Filters: []ec2types.Filter{
 			{Name: aws.String("vpc-id"), Values: []string{vpcID}},
@@ -64,14 +67,22 @@ func findSecurityGroupByName(ctx context.Context, c *ec2.Client, vpcID, name str
 		},
 	})
 	if err != nil {
-		return "", fmt.Errorf("describe security groups %q: %w", name, err)
+		return "", false, fmt.Errorf("describe security groups %q: %w", name, err)
 	}
 
 	if len(out.SecurityGroups) == 0 {
-		return "", nil
+		return "", false, nil
 	}
 
-	return *out.SecurityGroups[0].GroupId, nil
+	sg := out.SecurityGroups[0]
+	for _, t := range sg.Tags {
+		if aws.ToString(t.Key) == "ManagedBy" && aws.ToString(t.Value) == "sbxadm" {
+			managed = true
+			break
+		}
+	}
+
+	return *sg.GroupId, managed, nil
 }
 
 func reconcileIngress(ctx context.Context, c *ec2.Client, sgID string, rules []IngressRule) error {

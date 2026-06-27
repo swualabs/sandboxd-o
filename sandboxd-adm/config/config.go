@@ -9,10 +9,7 @@ import (
 	"sandboxd-o/pkg/envutil"
 )
 
-const (
-	DefaultStoreTable  = "sbxadm_store"
-	DefaultOrchTimeout = "10s"
-)
+const DefaultStoreTable = "sbxadm_store"
 
 type Config struct {
 	StoreDynamoDBTable string

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -16,6 +17,7 @@ var ErrClusterExists = errors.New("cluster already exists")
 var ErrClusterNotFound = errors.New("cluster not found")
 var ErrWorkerExists = errors.New("worker already exists")
 var ErrWorkerNotFound = errors.New("worker not found")
+var ErrClusterModified = errors.New("cluster was modified concurrently; retry")
 
 type Store struct {
 	ddb   *dynamodb.Client
@@ -104,6 +106,7 @@ func (s *Store) ListClusters(ctx context.Context) ([]Cluster, error) {
 }
 
 func (s *Store) PutNewCluster(ctx context.Context, c Cluster) error {
+	c.Revision = 1
 	item, err := attributevalue.MarshalMap(c)
 	if err != nil {
 		return fmt.Errorf("marshal cluster %q: %w", c.Name, err)
@@ -128,17 +131,37 @@ func (s *Store) PutNewCluster(ctx context.Context, c Cluster) error {
 	return nil
 }
 
+// SaveCluster persists an updated cluster using optimistic concurrency: it
+// only succeeds if the stored revision still matches the one that was read
+// into c, then bumps it. A concurrent writer that already advanced the
+// revision makes this fail with ErrClusterModified instead of silently
+// overwriting their change.
 func (s *Store) SaveCluster(ctx context.Context, c Cluster) error {
+	expected := c.Revision
+	c.Revision = expected + 1
+
 	item, err := attributevalue.MarshalMap(c)
 	if err != nil {
 		return fmt.Errorf("marshal cluster %q: %w", c.Name, err)
 	}
 
 	_, err = s.ddb.PutItem(ctx, &dynamodb.PutItemInput{
-		TableName: aws.String(s.table),
-		Item:      item,
+		TableName:           aws.String(s.table),
+		Item:                item,
+		ConditionExpression: aws.String("attribute_exists(#n) AND (attribute_not_exists(#r) OR #r = :exp)"),
+		ExpressionAttributeNames: map[string]string{
+			"#n": "name",
+			"#r": "revision",
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":exp": &types.AttributeValueMemberN{Value: strconv.FormatInt(expected, 10)},
+		},
 	})
 	if err != nil {
+		var cce *types.ConditionalCheckFailedException
+		if errors.As(err, &cce) {
+			return ErrClusterModified
+		}
 		return fmt.Errorf("save cluster %q: %w", c.Name, err)
 	}
 

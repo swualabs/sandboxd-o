@@ -22,8 +22,6 @@ type Options struct {
 	OrchServer string
 	Timeout    time.Duration
 	NoColor    bool
-
-	cfg cfgfile.Config
 }
 
 func NewRoot() *cobra.Command {
@@ -41,7 +39,6 @@ func NewRoot() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			opts.cfg = cfg
 
 			if strings.TrimSpace(opts.StoreTable) == "" {
 				opts.StoreTable = cfg.StoreDynamoDBTable

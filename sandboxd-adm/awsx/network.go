@@ -14,11 +14,6 @@ type SubnetInfo struct {
 	MapPublicIPOnLaunch bool
 }
 
-func ValidateVPC(ctx context.Context, c *ec2.Client, vpcID string) error {
-	_, err := ValidateVPCAndGetCIDR(ctx, c, vpcID)
-	return err
-}
-
 func ValidateVPCAndGetCIDR(ctx context.Context, c *ec2.Client, vpcID string) (string, error) {
 	out, err := c.DescribeVpcs(ctx, &ec2.DescribeVpcsInput{VpcIds: []string{vpcID}})
 	if err != nil {

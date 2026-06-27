@@ -83,16 +83,17 @@ func WaitForLocalHealthz(ctx context.Context, c *ssm.Client, instanceID string, 
 	// POSIX sh (not bash) is what AWS-RunShellScript actually executes on
 	// Ubuntu (/bin/sh -> dash), so this must not rely on bash-only
 	// features like the magic $SECONDS variable -- use `date +%s` instead.
+	// The success marker must not be a substring of the failure marker.
 	script := fmt.Sprintf(`
 end=$(( $(date +%%s) + %d ))
 while [ "$(date +%%s)" -lt "$end" ]; do
   if curl -fsS -m 3 http://127.0.0.1:%d/healthz >/dev/null 2>&1; then
-    echo HEALTHY
+    echo SBX_HEALTHY_OK
     exit 0
   fi
   sleep 5
 done
-echo UNHEALTHY
+echo SBX_NOT_HEALTHY
 exit 1
 `, deadlineSecs, port)
 
@@ -101,7 +102,7 @@ exit 1
 		return err
 	}
 
-	if status != "Success" || !strings.Contains(stdout, "HEALTHY") {
+	if status != "Success" || !strings.Contains(stdout, "SBX_HEALTHY_OK") {
 		return fmt.Errorf("service on %s:%d did not become healthy within %s (ssm status=%s)", instanceID, port, timeout, status)
 	}
 

@@ -88,10 +88,3 @@ func NewClients(ctx context.Context, profile, region string) (*Clients, error) {
 		Region:   region,
 	}, nil
 }
-
-func strPtr(v string) *string {
-	if v == "" {
-		return nil
-	}
-	return aws.String(v)
-}

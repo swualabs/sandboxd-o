@@ -291,35 +291,48 @@ setup_ecr_auto_login() {
         DEBIAN_FRONTEND=noninteractive apt-get install -y awscli >/dev/null
     fi
 
-    # containerd only reads registry auth from its single config.toml at
-    # startup; splitting it into conf.d/*.toml lets the refresh timer below
-    # update just the ECR auth block without regenerating the whole file
-    # install.sh wrote.
+    # Point containerd's CRI registry resolver at a config_path directory.
+    # Host configs under it (certs.d/<host>/hosts.toml) are read per pull,
+    # so the periodic token refresh below only rewrites a hosts.toml file
+    # and never has to restart containerd. config_path itself is a config
+    # change, so it's applied via a conf.d drop-in with a single restart
+    # here at provisioning time (before any sandbox is running).
     if ! grep -q '^imports = \["/etc/containerd/conf.d/\*\.toml"\]' /etc/containerd/config.toml 2>/dev/null; then
         sed -i '1i imports = ["/etc/containerd/conf.d/*.toml"]' /etc/containerd/config.toml
     fi
-    mkdir -p /etc/containerd/conf.d
+    mkdir -p /etc/containerd/conf.d /etc/containerd/certs.d
+
+    cat >/etc/containerd/conf.d/registry.toml <<'EOF'
+[plugins."io.containerd.grpc.v1.cri".registry]
+  config_path = "/etc/containerd/certs.d"
+EOF
 
     local region
     region="$(curl -fsS -m 3 -H "X-aws-ec2-metadata-token: $(curl -fsS -m 3 -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' http://169.254.169.254/latest/api/token)" http://169.254.169.254/latest/meta-data/placement/region)"
     [[ -n "$region" ]] || die "could not resolve region from instance metadata for ECR auto-login"
 
+    # The refresh script writes the per-host hosts.toml with a Basic auth
+    # header (AWS:<ecr-token>). hosts.toml is consulted per pull, so a
+    # refreshed token takes effect without restarting containerd.
     cat >/usr/local/bin/sbxadm-ecr-refresh.sh <<SCRIPT
 #!/bin/bash
 set -euo pipefail
+umask 077
 REGION="${region}"
 ACCOUNT_ID="\$(aws sts get-caller-identity --region "\${REGION}" --query Account --output text)"
 TOKEN="\$(aws ecr get-login-password --region "\${REGION}")"
 HOST="\${ACCOUNT_ID}.dkr.ecr.\${REGION}.amazonaws.com"
+BASIC="\$(printf 'AWS:%s' "\${TOKEN}" | base64 -w0)"
 
-cat >/etc/containerd/conf.d/ecr.toml <<EOF
-[plugins."io.containerd.grpc.v1.cri".registry.configs."\${HOST}".auth]
-  username = "AWS"
-  password = "\${TOKEN}"
+mkdir -p "/etc/containerd/certs.d/\${HOST}"
+cat >"/etc/containerd/certs.d/\${HOST}/hosts.toml" <<EOF
+server = "https://\${HOST}"
+
+[host."https://\${HOST}"]
+  capabilities = ["pull", "resolve"]
+  [host."https://\${HOST}".header]
+    Authorization = ["Basic \${BASIC}"]
 EOF
-chmod 0600 /etc/containerd/conf.d/ecr.toml
-
-systemctl restart containerd
 SCRIPT
     chmod 0700 /usr/local/bin/sbxadm-ecr-refresh.sh
 
@@ -332,6 +345,7 @@ Type=oneshot
 ExecStart=/usr/local/bin/sbxadm-ecr-refresh.sh
 EOF
 
+    # ECR tokens last ~12h; refresh every 6h. No containerd restart needed.
     cat >/etc/systemd/system/sbxadm-ecr-refresh.timer <<'EOF'
 [Unit]
 Description=Periodic ECR registry auth refresh for containerd
@@ -344,6 +358,9 @@ OnUnitActiveSec=6h
 WantedBy=timers.target
 EOF
 
+    # One-time restart so containerd picks up config_path; subsequent token
+    # refreshes only rewrite hosts.toml and need no restart.
+    systemctl restart containerd
     systemctl daemon-reload
     systemctl enable --now sbxadm-ecr-refresh.timer
     /usr/local/bin/sbxadm-ecr-refresh.sh

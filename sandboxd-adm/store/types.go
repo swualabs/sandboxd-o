@@ -14,6 +14,11 @@ type Cluster struct {
 	CreatedAt     time.Time `dynamodbav:"created_at"`
 	UpdatedAt     time.Time `dynamodbav:"updated_at"`
 
+	// Revision is bumped on every write and used as an optimistic-lock
+	// guard so concurrent create/delete-worker calls can't silently
+	// clobber each other (see SaveCluster).
+	Revision int64 `dynamodbav:"revision"`
+
 	// WorkerSecurityGroup is shared by every worker in the cluster.
 	WorkerSecurityGroup         string `dynamodbav:"worker_security_group_id,omitempty"`
 	ControlPlaneInstanceProfile string `dynamodbav:"control_plane_instance_profile,omitempty"`

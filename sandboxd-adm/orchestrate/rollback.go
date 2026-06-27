@@ -34,12 +34,15 @@ func (r *rollbackStack) run(s *stepper.Stepper) {
 	}
 
 	s.Step("rolling back partially created resources")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
 
 	for _, a := range slices.Backward(r.actions) {
-
-		if err := a.fn(ctx); err != nil {
+		// Each action gets its own budget: instance termination alone can
+		// wait up to 5m on its waiter, and a single shared deadline would
+		// let an early step starve the remaining rollbacks.
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+		err := a.fn(ctx)
+		cancel()
+		if err != nil {
 			s.Warn("rollback step failed (%s): %v", a.desc, err)
 			continue
 		}

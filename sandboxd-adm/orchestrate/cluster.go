@@ -78,6 +78,23 @@ func CreateCluster(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc
 	}
 	s.Done("vpc=%s cidr=%s public_subnets=%v private_subnets=%v", in.VPCID, vpcCIDR, in.PublicSubnetIDs, in.PrivateSubnetIDs)
 
+	s.Step("checking public subnets have an internet gateway route")
+	for _, sn := range in.PublicSubnetIDs {
+		hasIGW, err := awsx.SubnetHasIGWRoute(ctx, ec2c, in.VPCID, sn)
+		if err != nil {
+			return fmt.Errorf("check public subnet igw route: %w", err)
+		}
+		if !hasIGW {
+			return fmt.Errorf(
+				"subnet %s was passed as --public-subnet but has no 0.0.0.0/0 route to an internet gateway; "+
+					"workers (and a --orch-public-endpoint control plane) launch here and would never finish booting. "+
+					"Attach an internet gateway with a default route to this subnet, or pass a real public subnet",
+				sn,
+			)
+		}
+	}
+	s.Done("public subnets have internet gateway egress")
+
 	if !in.OrchPublicEndpoint {
 		targetPrivateSubnet := pickSubnet(in.PrivateSubnetIDs)
 		s.Step("checking internet/SSM egress for private subnet %s", targetPrivateSubnet)
@@ -138,14 +155,11 @@ func CreateCluster(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc
 	orchSGName := fmt.Sprintf("sbxcluster-%s-orch-sg", name)
 	workerSGName := fmt.Sprintf("sbxcluster-%s-worker-sg", name)
 
-	s.Step("creating security group %s", workerSGName)
-	workerSGID, err := awsx.EnsureSecurityGroup(ctx, ec2c, in.VPCID, workerSGName, fmt.Sprintf("sbxadm worker node SG for cluster %s", name), nil)
-	if err != nil {
-		return fmt.Errorf("create worker security group: %w", err)
-	}
-
-	s.Done("security group %s ready (rules added once orch SG exists)", workerSGID)
-
+	// The orch SG is created first so the worker SG can reference it in an
+	// ingress rule. Its rollback is registered before the worker SG's, so
+	// the LIFO rollback deletes the worker SG (which references the orch
+	// SG) first, avoiding a DependencyViolation. Each rollback is
+	// registered immediately after creation, so no SG can leak.
 	s.Step("creating security group %s", orchSGName)
 	orchOpenCIDR := vpcCIDR
 	if in.OrchPublicEndpoint {
@@ -162,26 +176,21 @@ func CreateCluster(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc
 	rollback.add(fmt.Sprintf("delete security group %s", orchSGID), func(ctx context.Context) error {
 		return awsx.DeleteSecurityGroup(ctx, ec2c, orchSGID)
 	})
-
 	s.Done("security group %s ready", orchSGID)
 
-	s.Step("reconciling worker SG ingress (public sandbox ports + sbxlet api from orch)")
-	if _, err := awsx.EnsureSecurityGroup(ctx, ec2c, in.VPCID, workerSGName, fmt.Sprintf("sbxadm worker node SG for cluster %s", name), []awsx.IngressRule{
+	s.Step("creating security group %s", workerSGName)
+	workerSGID, err := awsx.EnsureSecurityGroup(ctx, ec2c, in.VPCID, workerSGName, fmt.Sprintf("sbxadm worker node SG for cluster %s", name), []awsx.IngressRule{
 		{Port: workerPortRangeFrom, ToPort: workerPortRangeTo, CIDR: "0.0.0.0/0", Description: "sandbox workload public ports"},
 		{Port: letAPIPort, SourceSGID: orchSGID, Description: "sbxlet api from control plane"},
-	}); err != nil {
-		return fmt.Errorf("reconcile worker security group ingress: %w", err)
+	})
+	if err != nil {
+		return fmt.Errorf("create worker security group: %w", err)
 	}
-	// Registered *after* the orch SG's rollback even though the worker SG
-	// was created first: it now references the orch SG via a
-	// UserIdGroupPairs ingress rule, so on rollback it must be deleted
-	// before the orch SG or DeleteSecurityGroup fails with
-	// DependencyViolation. Rollback runs LIFO, so this ordering deletes
-	// the worker SG first.
+
 	rollback.add(fmt.Sprintf("delete security group %s", workerSGID), func(ctx context.Context) error {
 		return awsx.DeleteSecurityGroup(ctx, ec2c, workerSGID)
 	})
-	s.Done("worker SG ingress reconciled")
+	s.Done("security group %s ready", workerSGID)
 
 	s.Step("creating IAM role/instance profile for control plane (SSM-managed, no SSH)")
 	cpProfile, err := awsx.EnsureInstanceProfile(ctx, iamc, fmt.Sprintf("sbxcluster-%s-control-plane", name), nil)
@@ -205,8 +214,8 @@ func CreateCluster(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc
 	})
 	s.Done("worker instance profile %s ready", workerProfile)
 
-	s.Step("resolving latest Ubuntu 22.04 AMI in %s", in.Region)
-	amiID, err := awsx.LatestUbuntuAMI(ctx, ec2c)
+	s.Step("resolving latest Ubuntu 22.04 AMI for %s in %s", in.OrchInstanceType, in.Region)
+	amiID, err := awsx.LatestUbuntuAMIForInstanceType(ctx, ec2c, in.OrchInstanceType)
 	if err != nil {
 		return err
 	}
@@ -234,12 +243,14 @@ func CreateCluster(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc
 
 	s.Step("launching control plane instance (type=%s subnet=%s public=%v)", in.OrchInstanceType, subnetID, in.OrchPublicEndpoint)
 	instanceID, privateIP, publicIP, err := awsx.LaunchInstance(ctx, ec2c, amiID, awsx.LaunchSpec{
-		Name:               fmt.Sprintf("sbxcluster-%s-orch", name),
-		InstanceType:       in.OrchInstanceType,
-		SubnetID:           subnetID,
-		SecurityGroupIDs:   []string{orchSGID},
-		RootVolumeSizeGB:   rootGiB,
-		AssignPublicIP:     in.OrchPublicEndpoint && eipAllocID == "",
+		Name:             fmt.Sprintf("sbxcluster-%s-orch", name),
+		InstanceType:     in.OrchInstanceType,
+		SubnetID:         subnetID,
+		SecurityGroupIDs: []string{orchSGID},
+		RootVolumeSizeGB: rootGiB,
+		// Always EIP-backed when public (an EIP is allocated above), so the
+		// instance never needs an auto-assigned public IP.
+		AssignPublicIP:     false,
 		UserData:           script,
 		IAMInstanceProfile: cpProfile,
 		Tags:               map[string]string{"sbxadm/cluster": name, "sbxadm/role": "orch"},
@@ -333,7 +344,7 @@ func DeleteCluster(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, st *
 
 	for _, w := range cluster.Workers {
 		s.Step("deleting worker %s (instance=%s)", w.Name, w.InstanceID)
-		if err := teardownWorker(ctx, ec2c, w); err != nil {
+		if err := teardownWorker(ctx, ec2c, w, s); err != nil {
 			return fmt.Errorf("delete worker %q: %w", w.Name, err)
 		}
 		s.Done("worker %s removed", w.Name)

@@ -3,6 +3,7 @@ package awsx
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -40,30 +41,29 @@ func CheckPrivateEgress(ctx context.Context, c *ec2.Client, vpcID, subnetID stri
 	return result, nil
 }
 
-func subnetHasNATRoute(ctx context.Context, c *ec2.Client, vpcID, subnetID string) (bool, error) {
-	out, err := c.DescribeRouteTables(ctx, &ec2.DescribeRouteTablesInput{
-		Filters: []ec2types.Filter{
-			{Name: aws.String("vpc-id"), Values: []string{vpcID}},
-			{Name: aws.String("association.subnet-id"), Values: []string{subnetID}},
-		},
-	})
+// SubnetHasIGWRoute reports whether the subnet's effective route table has a
+// 0.0.0.0/0 route to an internet gateway, i.e. it's a real public subnet.
+func SubnetHasIGWRoute(ctx context.Context, c *ec2.Client, vpcID, subnetID string) (bool, error) {
+	tables, err := effectiveRouteTables(ctx, c, vpcID, subnetID)
 	if err != nil {
-		return false, fmt.Errorf("describe route tables for subnet %q: %w", subnetID, err)
+		return false, err
 	}
 
-	tables := out.RouteTables
-	if len(tables) == 0 {
-		// No explicit association: subnet uses the VPC's main route table.
-		mainOut, err := c.DescribeRouteTables(ctx, &ec2.DescribeRouteTablesInput{
-			Filters: []ec2types.Filter{
-				{Name: aws.String("vpc-id"), Values: []string{vpcID}},
-				{Name: aws.String("association.main"), Values: []string{"true"}},
-			},
-		})
-		if err != nil {
-			return false, fmt.Errorf("describe main route table for vpc %q: %w", vpcID, err)
+	for _, rt := range tables {
+		for _, r := range rt.Routes {
+			if r.GatewayId != nil && strings.HasPrefix(*r.GatewayId, "igw-") && r.State == ec2types.RouteStateActive {
+				return true, nil
+			}
 		}
-		tables = mainOut.RouteTables
+	}
+
+	return false, nil
+}
+
+func subnetHasNATRoute(ctx context.Context, c *ec2.Client, vpcID, subnetID string) (bool, error) {
+	tables, err := effectiveRouteTables(ctx, c, vpcID, subnetID)
+	if err != nil {
+		return false, err
 	}
 
 	for _, rt := range tables {
@@ -75,6 +75,37 @@ func subnetHasNATRoute(ctx context.Context, c *ec2.Client, vpcID, subnetID strin
 	}
 
 	return false, nil
+}
+
+// effectiveRouteTables returns the route table(s) that apply to a subnet:
+// its explicitly associated table, or the VPC main table when none is
+// explicitly associated.
+func effectiveRouteTables(ctx context.Context, c *ec2.Client, vpcID, subnetID string) ([]ec2types.RouteTable, error) {
+	out, err := c.DescribeRouteTables(ctx, &ec2.DescribeRouteTablesInput{
+		Filters: []ec2types.Filter{
+			{Name: aws.String("vpc-id"), Values: []string{vpcID}},
+			{Name: aws.String("association.subnet-id"), Values: []string{subnetID}},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("describe route tables for subnet %q: %w", subnetID, err)
+	}
+
+	if len(out.RouteTables) > 0 {
+		return out.RouteTables, nil
+	}
+
+	mainOut, err := c.DescribeRouteTables(ctx, &ec2.DescribeRouteTablesInput{
+		Filters: []ec2types.Filter{
+			{Name: aws.String("vpc-id"), Values: []string{vpcID}},
+			{Name: aws.String("association.main"), Values: []string{"true"}},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("describe main route table for vpc %q: %w", vpcID, err)
+	}
+
+	return mainOut.RouteTables, nil
 }
 
 func vpcHasSSMEndpoints(ctx context.Context, c *ec2.Client, vpcID string) (bool, error) {
@@ -95,7 +126,7 @@ func vpcHasSSMEndpoints(ctx context.Context, c *ec2.Client, vpcID string) (bool,
 		}
 
 		for suffix := range needed {
-			if hasSuffix(*ep.ServiceName, "."+suffix) {
+			if strings.HasSuffix(*ep.ServiceName, "."+suffix) {
 				needed[suffix] = true
 			}
 		}
@@ -108,8 +139,4 @@ func vpcHasSSMEndpoints(ctx context.Context, c *ec2.Client, vpcID string) (bool,
 	}
 
 	return true, nil
-}
-
-func hasSuffix(s, suffix string) bool {
-	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
 }

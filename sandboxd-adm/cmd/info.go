@@ -30,7 +30,7 @@ func newInfoWorkerCommand(opts *Options) *cobra.Command {
 		Short: "Show detailed information about a single worker node",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := requireFlags(map[string]string{"--cluster": clusterName}); err != nil {
+			if err := requireFlags(requiredFlag{"--cluster", clusterName}); err != nil {
 				return err
 			}
 

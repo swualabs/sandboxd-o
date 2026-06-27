@@ -69,16 +69,8 @@ func CreateWorker(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc 
 		}
 	}
 
+	prevECRPatterns := cluster.WorkerECRRepoPatterns
 	mergedECRPatterns := cluster.WorkerECRRepoPatterns
-	if len(newECRPatterns) > 0 {
-		mergedECRPatterns = awsx.MergeECRRepoPatterns(cluster.WorkerECRRepoPatterns, newECRPatterns)
-		s.Step("granting ECR pull access for repositories: %v", mergedECRPatterns)
-		workerRoleBase := fmt.Sprintf("sbxcluster-%s-worker", in.ClusterName)
-		if err := awsx.PutECRPullPolicy(ctx, iamc, workerRoleBase, cluster.Region, accountID, mergedECRPatterns); err != nil {
-			return fmt.Errorf("grant ecr pull access: %w", err)
-		}
-		s.Done("ECR pull allowlist updated for cluster %q (shared by all its workers)", in.ClusterName)
-	}
 
 	var eipAllocID string
 	if in.PublicEIP != "" {
@@ -90,6 +82,26 @@ func CreateWorker(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc 
 
 	var rollback rollbackStack
 	defer rollback.run(s)
+
+	// Grant ECR pull access only after the rollback stack exists, and
+	// register a rollback that restores the previous allowlist, so a later
+	// failure can't leave the IAM role's policy ahead of the persisted
+	// (DynamoDB) state.
+	if len(newECRPatterns) > 0 {
+		mergedECRPatterns = awsx.MergeECRRepoPatterns(cluster.WorkerECRRepoPatterns, newECRPatterns)
+		workerRoleBase := fmt.Sprintf("sbxcluster-%s-worker", in.ClusterName)
+		s.Step("granting ECR pull access for repositories: %v", mergedECRPatterns)
+		if err := awsx.PutECRPullPolicy(ctx, iamc, workerRoleBase, cluster.Region, accountID, mergedECRPatterns); err != nil {
+			return fmt.Errorf("grant ecr pull access: %w", err)
+		}
+		rollback.add("restore previous ECR pull allowlist", func(ctx context.Context) error {
+			if len(prevECRPatterns) == 0 {
+				return awsx.DeleteECRPullPolicy(ctx, iamc, workerRoleBase)
+			}
+			return awsx.PutECRPullPolicy(ctx, iamc, workerRoleBase, cluster.Region, accountID, prevECRPatterns)
+		})
+		s.Done("ECR pull allowlist updated for cluster %q (shared by all its workers)", in.ClusterName)
+	}
 
 	var eipManaged bool
 	var preAssociatedIP string
@@ -111,8 +123,8 @@ func CreateWorker(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc 
 
 	external := strings.TrimSpace(in.External)
 
-	s.Step("resolving latest Ubuntu 22.04 AMI in %s", cluster.Region)
-	amiID, err := awsx.LatestUbuntuAMI(ctx, ec2c)
+	s.Step("resolving latest Ubuntu 22.04 AMI for %s in %s", in.InstanceType, cluster.Region)
+	amiID, err := awsx.LatestUbuntuAMIForInstanceType(ctx, ec2c, in.InstanceType)
 	if err != nil {
 		return err
 	}
@@ -302,7 +314,7 @@ func DeleteWorker(ctx context.Context, ec2c *ec2.Client, st *store.Store, cluste
 	}
 
 	s.Step("terminating worker instance %s", worker.InstanceID)
-	if err := teardownWorker(ctx, ec2c, worker); err != nil {
+	if err := teardownWorker(ctx, ec2c, worker, s); err != nil {
 		return err
 	}
 	s.Done("worker instance terminated")
@@ -319,14 +331,16 @@ func DeleteWorker(ctx context.Context, ec2c *ec2.Client, st *store.Store, cluste
 	return nil
 }
 
-func teardownWorker(ctx context.Context, ec2c *ec2.Client, w store.Worker) error {
+// teardownWorker treats EIP cleanup as best-effort (warn and continue) so a
+// transient EIP error never blocks the actual instance termination.
+func teardownWorker(ctx context.Context, ec2c *ec2.Client, w store.Worker, s *stepper.Stepper) error {
 	if w.PublicEIPAllocID != "" {
 		if w.PublicEIPManaged {
 			if err := awsx.ReleaseEIP(ctx, ec2c, w.PublicEIPAllocID); err != nil {
-				return fmt.Errorf("release eip: %w", err)
+				s.Warn("release eip %s: %v", w.PublicEIPAllocID, err)
 			}
 		} else if err := awsx.DisassociateEIP(ctx, ec2c, w.PublicEIPAllocID); err != nil {
-			return fmt.Errorf("disassociate eip: %w", err)
+			s.Warn("disassociate eip %s: %v", w.PublicEIPAllocID, err)
 		}
 	}
 	return awsx.TerminateInstance(ctx, ec2c, w.InstanceID)

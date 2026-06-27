@@ -35,13 +35,13 @@ func newCreateClusterCommand(opts *Options) *cobra.Command {
 			in.PublicSubnetIDs = splitCSV(publicSubnets)
 			in.PrivateSubnetIDs = splitCSV(privateSubnets)
 
-			if err := requireFlags(map[string]string{
-				"--version":        in.Version,
-				"--vpc-id":         in.VPCID,
-				"--public-subnet":  publicSubnets,
-				"--private-subnet": privateSubnets,
-				"--orch-instance":  in.OrchInstanceType,
-			}); err != nil {
+			if err := requireFlags(
+				requiredFlag{"--version", in.Version},
+				requiredFlag{"--vpc-id", in.VPCID},
+				requiredFlag{"--public-subnet", publicSubnets},
+				requiredFlag{"--private-subnet", privateSubnets},
+				requiredFlag{"--orch-instance", in.OrchInstanceType},
+			); err != nil {
 				return err
 			}
 
@@ -89,11 +89,11 @@ func newCreateWorkerCommand(opts *Options) *cobra.Command {
 			in.OrchServer = opts.OrchServer
 			in.OrchTimeout = opts.Timeout
 
-			if err := requireFlags(map[string]string{
-				"--version":  in.Version,
-				"--cluster":  in.ClusterName,
-				"--instance": in.InstanceType,
-			}); err != nil {
+			if err := requireFlags(
+				requiredFlag{"--version", in.Version},
+				requiredFlag{"--cluster", in.ClusterName},
+				requiredFlag{"--instance", in.InstanceType},
+			); err != nil {
 				return err
 			}
 
@@ -150,10 +150,15 @@ func splitCSV(raw string) []string {
 	return out
 }
 
-func requireFlags(flags map[string]string) error {
-	for name, val := range flags {
-		if strings.TrimSpace(val) == "" {
-			return fmt.Errorf("%s is required", name)
+type requiredFlag struct {
+	name  string
+	value string
+}
+
+func requireFlags(flags ...requiredFlag) error {
+	for _, f := range flags {
+		if strings.TrimSpace(f.value) == "" {
+			return fmt.Errorf("%s is required", f.name)
 		}
 	}
 
