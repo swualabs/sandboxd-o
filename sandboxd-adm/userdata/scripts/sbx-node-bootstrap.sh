@@ -15,11 +15,11 @@ START_SERVICE="${START_SERVICE:-true}"
 TMP_DIR=""
 
 log() {
-    printf '[sandboxd-o-ami] %s\n' "$*" >&2
+    printf '[sbx-node-bootstrap] %s\n' "$*" >&2
 }
 
 die() {
-    printf '[sandboxd-o-ami] ERROR: %s\n' "$*" >&2
+    printf '[sbx-node-bootstrap] ERROR: %s\n' "$*" >&2
     exit 1
 }
 
@@ -33,11 +33,11 @@ on_error() {
     local exit_code=$?
     local line_no="${1:-unknown}"
 
-    printf '[sandboxd-o-ami] ERROR: failed at line %s, exit code %s\n' "$line_no" "$exit_code" >&2
+    printf '[sbx-node-bootstrap] ERROR: failed at line %s, exit code %s\n' "$line_no" "$exit_code" >&2
 
     if [[ -n "${COMPONENT:-}" ]] && command -v systemctl >/dev/null 2>&1; then
         if systemctl list-unit-files "${COMPONENT}.service" >/dev/null 2>&1; then
-            printf '\n[sandboxd-o-ami] Recent journal logs:\n' >&2
+            printf '\n[sbx-node-bootstrap] Recent journal logs:\n' >&2
             journalctl -u "${COMPONENT}.service" -n 120 --no-pager >&2 || true
         fi
     fi
@@ -51,8 +51,8 @@ trap cleanup EXIT
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  sudo bash prepare-sandboxd-o-ami.sh sbxlet
-  sudo bash prepare-sandboxd-o-ami.sh sbxorch
+  sudo bash sbx-node-bootstrap.sh sbxlet
+  sudo bash sbx-node-bootstrap.sh sbxorch
 
 Environment variables:
   ARTICLES_ZIP_URL    Release zip URL.
@@ -60,10 +60,10 @@ Environment variables:
   START_SERVICE       Start service immediately after install. Default: true
 
 Examples:
-  sudo bash prepare-sandboxd-o-ami.sh sbxlet
-  sudo bash prepare-sandboxd-o-ami.sh sbxorch
-  sudo START_SERVICE=false bash prepare-sandboxd-o-ami.sh sbxlet
-  sudo ARTICLES_ZIP_URL=https://github.com/swualabs/sandboxd-o/releases/download/v0.3.0/articles.zip bash prepare-sandboxd-o-ami.sh sbxlet
+  sudo bash sbx-node-bootstrap.sh sbxlet
+  sudo bash sbx-node-bootstrap.sh sbxorch
+  sudo START_SERVICE=false bash sbx-node-bootstrap.sh sbxlet
+  sudo ARTICLES_ZIP_URL=https://github.com/swualabs/sandboxd-o/releases/download/v0.3.0/articles.zip bash sbx-node-bootstrap.sh sbxlet
 EOF
 }
 
@@ -120,7 +120,9 @@ install_packages() {
     apt-get install -y \
         ca-certificates \
         curl \
-        unzip
+        unzip \
+        jq \
+        tar
 }
 
 download_and_extract() {
@@ -178,17 +180,19 @@ find_articles_dir() {
 
 validate_extracted_files() {
     local src_dir="$1"
+    local configs_dir="$2"
+    local scripts_dir="$3"
 
     [[ -d "$src_dir" ]] || die "source directory does not exist: ${src_dir}"
     [[ -f "${src_dir}/${COMPONENT}" ]] || die "${COMPONENT} not found in ${src_dir}"
 
     if [[ "$COMPONENT" == "sbxlet" ]]; then
-        [[ -f "${src_dir}/install.sh" ]] || die "install.sh is required for sbxlet but was not found in ${src_dir}"
+        [[ -f "${scripts_dir}/install.sh" ]] || die "install.sh is required for sbxlet but was not found in ${scripts_dir}"
     fi
 
-    [[ -f "${src_dir}/configs/sbxlet_config.json" ]] || die "configs/sbxlet_config.json not found in ${src_dir}"
-    [[ -f "${src_dir}/configs/sbxorch_config.json" ]] || die "configs/sbxorch_config.json not found in ${src_dir}"
-    [[ -f "${src_dir}/configs/sbxctl_config.json" ]] || die "configs/sbxctl_config.json not found in ${src_dir}"
+    [[ -f "${configs_dir}/sbxlet_config.json" ]] || die "configs/sbxlet_config.json not found in ${configs_dir}"
+    [[ -f "${configs_dir}/sbxorch_config.json" ]] || die "configs/sbxorch_config.json not found in ${configs_dir}"
+    [[ -f "${configs_dir}/sbxctl_config.json" ]] || die "configs/sbxctl_config.json not found in ${configs_dir}"
 }
 
 stop_existing_services() {
@@ -216,6 +220,7 @@ stop_existing_services() {
 
 install_articles() {
     local src_dir="$1"
+    local scripts_dir="$2"
 
     log "Installing articles into ${APP_DIR}"
 
@@ -224,6 +229,10 @@ install_articles() {
     mkdir -p "$APP_DIR"
 
     cp -a "${src_dir}/." "$APP_DIR/"
+
+    if [[ "$COMPONENT" == "sbxlet" && -f "${scripts_dir}/install.sh" ]]; then
+        cp -a "${scripts_dir}/install.sh" "${APP_DIR}/install.sh"
+    fi
 
     chown -R root:root "$APP_DIR"
 
@@ -237,14 +246,15 @@ install_articles() {
 }
 
 install_default_configs() {
+    local configs_dir="$1"
     local config_root="/var/lib/sandboxd"
 
     log "Installing default JSON configs into ${config_root}"
 
     mkdir -p "${config_root}"
-    install -m 0644 "${APP_DIR}/configs/sbxlet_config.json" "${config_root}/sbxlet_config.json"
-    install -m 0644 "${APP_DIR}/configs/sbxorch_config.json" "${config_root}/sbxorch_config.json"
-    install -m 0644 "${APP_DIR}/configs/sbxctl_config.json" "${config_root}/sbxctl_config.json"
+    install -m 0644 "${configs_dir}/sbxlet_config.json" "${config_root}/sbxlet_config.json"
+    install -m 0644 "${configs_dir}/sbxorch_config.json" "${config_root}/sbxorch_config.json"
+    install -m 0644 "${configs_dir}/sbxctl_config.json" "${config_root}/sbxctl_config.json"
 }
 
 run_install_sh_if_needed() {
@@ -256,7 +266,18 @@ run_install_sh_if_needed() {
     log "Running install.sh for sbxlet"
 
     cd "$APP_DIR"
+    # install.sh's own last line ("runsc --version | head -n 1") can exit
+    # 141 (SIGPIPE) under `set -o pipefail` purely because head closes the
+    # pipe early -- the install itself has already fully succeeded by then.
+    # Treat that one exit code as success; anything else is a real failure.
+    local rc=0
+    set +e
     ./install.sh
+    rc=$?
+    set -e
+    if [[ $rc -ne 0 && $rc -ne 141 ]]; then
+        die "install.sh failed with exit code ${rc}"
+    fi
 }
 
 write_systemd_service() {
@@ -328,7 +349,7 @@ start_and_verify_service() {
 print_summary() {
     cat <<EOF
 
-[sandboxd-o-ami] Done.
+[sbx-node-bootstrap] Done.
 
 Component:
   ${COMPONENT}
@@ -364,12 +385,15 @@ main() {
     local src_dir
     src_dir="$(find_articles_dir "$extract_dir")"
 
+    local configs_dir="${extract_dir}/configs"
+    local scripts_dir="${extract_dir}/scripts"
+
     log "Detected articles directory: ${src_dir}"
 
-    validate_extracted_files "$src_dir"
+    validate_extracted_files "$src_dir" "$configs_dir" "$scripts_dir"
     stop_existing_services
-    install_articles "$src_dir"
-    install_default_configs
+    install_articles "$src_dir" "$scripts_dir"
+    install_default_configs "$configs_dir"
     run_install_sh_if_needed
     verify_binary
     write_systemd_service

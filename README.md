@@ -29,6 +29,13 @@
         - [Sync Loops](#sync-loops)
         - [Scheduler/Reconcile Loops](#schedulerreconcile-loops)
     - [Sandboxd CLI(sbxctl)](#sandboxd-clisbxctl)
+    - [Sandboxd Admin CLI(sbxadm)](#sandboxd-admin-clisbxadm)
+        - [Environment Configuration](#environment-configuration)
+        - [Cluster/Control Plane Creation](#clustercontrol-plane-creation)
+        - [Worker Node Creation](#worker-node-creation)
+        - [Security Model](#security-model)
+        - [Cluster/Worker Info and Refreshing the sbxctl Config](#clusterworker-info-and-refreshing-the-sbxctl-config)
+        - [Cluster/Worker Deletion](#clusterworker-deletion)
 - [Resource Model/Objects](#resource-modelobjects)
     - [Node](#node)
     - [External](#external)
@@ -57,7 +64,7 @@
 - [Appendix D. API Documentation](#appendix-d-api-documentation)
 - [Appendix E. FAQ, Troubleshooting and Best Practices](#appendix-e-faq-troubleshooting-and-best-practices)
 - [Appendix F. Contribution and Contributors](#appendix-f-contribution-and-contributors)
-- [Appendix G. License](#appendix-g-license)
+- [Appendix G. MIT License](#appendix-g-mit-license)
 
 ---
 
@@ -251,6 +258,130 @@ The main available commands are as follows:
 - `create`: Used to create resources from a YAML file. For example: `sbxctl create -f examples/node.yaml`
 - `delete`: Used to delete resources. For example: `sbxctl delete node/sandboxd-node-1`. A specific resource must be explicitly specified.
 - `logs`: Used to retrieve sandbox-level logs with each line prefixed by the container name. For example: `sbxctl logs s/sbx-wordpress-demo` returns lines such as `[app] ...` and `[db] ...`. For backward compatibility, `sbxctl logs s/sbx-wordpress-demo app` still retrieves only the `app` container logs. Use `sbxctl logs s/sbx-wordpress-demo --watch` to poll logs and print newly added lines. Internally, this command uses sbxorch's Proxied API to send requests directly to the sbxlet instance running on the target node and retrieve logs.
+
+## Sandboxd Admin CLI(sbxadm)
+
+`sbxadm` is an administrative CLI for provisioning and managing entire Sandboxd-O clusters — both the control plane (sbxorch) and worker nodes (sbxlet).
+It currently targets AWS EC2-based clusters, with support for other cloud providers and on-premises environments planned for the future.
+
+Unlike `sbxctl`, which is a client that talks to the sbxorch API, `sbxadm` provisions real infrastructure directly via the AWS SDK for Go — EC2 instances, security groups, IAM instance profiles, Elastic IPs — and persists that state in DynamoDB. It does not rely on a separate IaC tool such as Terraform or CloudFormation.
+
+```
+Sandboxd-O Admin: provisions sbxorch/sbxlet clusters on AWS
+
+Usage:
+  sbxadm [command]
+
+Available Commands:
+  completion           Generate the autocompletion script for the specified shell
+  create               Create a cluster or worker node
+  delete               Delete a worker node or an entire cluster
+  help                 Help about any command
+  info                 Show detailed cluster/worker information
+  update-sbxctl-config Refresh /var/lib/sandboxd/sbxctl_config.json on a cluster's public control plane
+
+Flags:
+      --env-file string      path to a KEY=VALUE env file (e.g. SBXADM_STORE_DYNAMODB, SBXADM_ORCH_SERVER)
+  -h, --help                 help for sbxadm
+      --no-color             disable colored output (also honors NO_COLOR env var)
+      --orch-server string   override orchestrator base URL (env: SBXADM_ORCH_SERVER; default: derived from the cluster's control plane IP)
+      --profile string       AWS profile (env: AWS_PROFILE, default: default)
+      --region string        AWS region (default: the region configured for --profile, env: AWS_REGION)
+      --store-table string   DynamoDB table for sbxadm state (env: SBXADM_STORE_DYNAMODB)
+      --timeout duration     orchestrator API request timeout (default 20s)
+
+Use "sbxadm [command] --help" for more information about a command.
+```
+
+### Environment Configuration
+
+Instead of a single JSON config file like `sbxctl`, `sbxadm` can also load the infrastructure-bootstrap settings it needs from a flat `KEY=VALUE` env file (`--env-file`; real process environment variables always take precedence over the file).
+
+```shell
+# sbxadm.env
+SBXADM_STORE_DYNAMODB=sbxadm_store
+SBXADM_ORCH_SERVER=http://<orch-public-ip>:8082
+```
+
+```shell
+sbxadm --env-file ./sbxadm.env info cluster my-cluster
+```
+
+If `--region` is omitted, `sbxadm` falls back to the region configured for `--profile` (default: `default`) — the same behavior as the AWS CLI when no `--region` flag is given.
+
+### Cluster/Control Plane Creation
+
+Exactly one control plane (sbxorch) can exist per cluster. The VPC id and the public/private subnets are all validated up front; the command fails if any of them don't exist or don't belong to that VPC.
+
+```shell
+sbxadm create cluster my-cluster \
+  --version 0.3.0 \
+  --vpc-id vpc-0123456789abcdef0 \
+  --public-subnet subnet-0aaa111,subnet-0bbb222 \
+  --private-subnet subnet-0ccc333,subnet-0ddd444 \
+  --region ap-northeast-2 \
+  --orch-instance t3.xlarge \
+  --orch-public-endpoint \
+  --orch-root-volume-size 16Gi
+```
+
+- `--orch-public-endpoint`: places the control plane in a public subnet with a public IP. Without it, the control plane lands in a private subnet with no public IP.
+- `--orch-public-eip`: attaches an existing Elastic IP by ARN or allocation id (requires `--orch-public-endpoint`). If omitted, `sbxadm` allocates and manages its own Elastic IP, so the address survives instance restarts.
+- `--orch-config`: a JSON file overlaid on top of the `configs/sbxorch_config.json` defaults. Only the keys present in the file are changed; everything else keeps the shipped default.
+- For a private control plane (no `--orch-public-endpoint`), `sbxadm` checks up front that the chosen private subnet's route table has a `0.0.0.0/0` route to a NAT gateway. If there's no NAT gateway, it fails immediately without creating any AWS resources — both SSM agent registration and downloading the GitHub release artifact require general internet egress (SSM VPC endpoints alone aren't sufficient).
+
+Creation is logged step by step in a terraform/eksctl-like style (security groups, then IAM instance profiles, then the EC2 instance). If anything fails partway through, every AWS resource created up to that point (EC2 instance, security groups, IAM profiles, Elastic IP) is automatically rolled back. Once the instance is running, `sbxadm` polls `/healthz` directly from inside the instance over SSM to confirm `sbxorch.service` actually came up before declaring the cluster created.
+
+### Worker Node Creation
+
+```shell
+sbxadm create worker my-worker-1 \
+  --cluster my-cluster \
+  --version 0.3.0 \
+  --instance t3.xlarge \
+  --root-volume-size 64Gi \
+  --external host1.example.com
+```
+
+Worker nodes always land in a public subnet, round-robined across the cluster's public subnets. If `--public-eip` is omitted, the worker's Elastic IP is also allocated and managed automatically, same as the control plane; if `--external` is omitted, that Elastic IP's address is registered as the External value automatically.
+
+Once the instance finishes bootstrapping (including installing gVisor/containerd) and passes the `sbxlet.service` health check, `sbxadm` automatically registers a Node object (and an External object, if applicable) with the sbxorch API. Deleting a worker tears down those Node/External objects along with terminating the EC2 instance.
+
+### Security Model
+
+Instances created by `sbxadm` never receive SSH key material. Instead, their IAM instance profile is granted `AmazonSSMManagedInstanceCore`, so they're reachable only via AWS Systems Manager Session Manager (port 22 isn't opened in any security group at all). Health checks work the same way: rather than sending an HTTP request from outside, `sbxadm` runs `curl 127.0.0.1:<port>/healthz` directly inside the instance over SSM — this works identically regardless of whether the node has a public endpoint.
+
+A worker's security group only opens the host port range used by sandbox workloads to the internet (default `10000-32767`, matching `host_port_min`/`host_port_max`), and only allows traffic to the sbxlet API port (8081) from the control plane's security group. The control plane's sbxorch API port (8082) is restricted to the VPC CIDR unless `--orch-public-endpoint` was given.
+
+Communication between orch and let is authenticated with a shared secret generated automatically at cluster creation time (see [Authentication](#authentication-shared-secret) above). This value is stored in DynamoDB and injected into both components' config files automatically, so there's nothing to manage by hand.
+
+### Cluster/Worker Info and Refreshing the sbxctl Config
+
+```shell
+sbxadm info cluster my-cluster
+sbxadm info worker my-worker-1 --cluster my-cluster
+```
+
+`info cluster` prints the instance type, subnet, security group, Elastic IP (and whether it's auto-allocated or user-supplied), and the final merged JSON config for both the control plane and every worker node.
+
+By default, `sbxctl` reads its `server`/`shared_secret` values from a local file on the control plane instance, `/var/lib/sandboxd/sbxctl_config.json`. Those values only ever exist in `sbxadm`'s DynamoDB record per cluster — they're never written to a file on the instance automatically. So to use `sbxctl` directly from inside the control plane (e.g. over an SSM session), someone would otherwise have to create or fill in that file by hand.
+
+`update-sbxctl-config` does this for you: it rebuilds `sbxctl_config.json` from the cluster's own record (`server`, `shared_secret`) and overwrites `/var/lib/sandboxd/sbxctl_config.json` on the control plane instance over SSM. There's no override option — it only ever refreshes from the cluster's own state:
+
+```shell
+sbxadm update-sbxctl-config my-cluster
+```
+
+It returns an error for clusters whose control plane isn't publicly accessible.
+
+### Cluster/Worker Deletion
+
+```shell
+sbxadm delete worker my-worker-1 --cluster my-cluster
+sbxadm delete cluster my-cluster
+```
+
+`delete cluster` tears down every worker node first, then the control plane, security groups, IAM instance profiles, any auto-allocated Elastic IPs, and finally the DynamoDB record. Deleting a cluster or worker that's already gone from AWS returns an error.
 
 # Resource Model / Objects
 
@@ -613,9 +744,9 @@ Likewise, when a sandbox is deleted through sbxorch, its state transitions to `D
 
 > [!NOTE]
 >
-> 만약 컨테이너별 의존성이 필요할 경우, `wordpress.yaml`의 예제와 같이 컨테이너의 `args` 필드에 커스텀 스크립트를 작성하여 의존성 체크 및 대기 로직을 구현하는 방식을 권장합니다. 예를 들어, WordPress 컨테이너가 MySQL 컨테이너에 의존성이 있는 경우, WordPress 컨테이너의 `args`에 MySQL이 준비될 때까지 대기하는 스크립트를 작성할 수 있습니다.
+> If container-level dependencies are required, it is recommended to implement dependency checks and wait logic through custom scripts in the container's `args` field, as shown in the `wordpress.yaml` example. For example, if the WordPress container depends on the MySQL container, the WordPress container can include a script in `args` that waits until MySQL is ready.
 >
-> 이는 위 Readiness Probe와는 다른 방식으로, Readiness Probe는 샌드박스의 상태를 `Running`으로 전환하기 위한 TCP Dial 또는 HTTP Get Health Check 등의 헬스 체크 메커니즘을 제공하지만, 컨테이너 간의 의존성이나 준비 상태를 직접적으로 관리하는 기능은 제공하지 않습니다.
+> This is separate from the Readiness Probe described above. The Readiness Probe provides health-check mechanisms such as TCP Dial or HTTP GET checks to transition the sandbox state to `Running`, but it does not directly manage dependencies or readiness between containers.
 
 This information can be checked using commands such as `sbxctl get sandboxes` or `sbxctl get sandboxes/:ID`, or through the API.
 
