@@ -38,3 +38,6 @@ ignore:
 
   # sbxctl is a CLI tool, so we don't need to cover it
   - "sandboxd-ctl/**"
+
+  # sbxadm is a CLI tool, so we don't need to cover it
+  - "sandboxd-adm/**"

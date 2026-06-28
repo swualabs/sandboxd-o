@@ -29,6 +29,15 @@
         - [Sync Loops](#sync-loops)
         - [Scheduler/Reconcile Loops](#schedulerreconcile-loops)
     - [Sandboxd CLI(sbxctl)](#sandboxd-clisbxctl)
+    - [Sandboxd Admin CLI(sbxadm)](#sandboxd-admin-clisbxadm)
+        - [Environment Configuration](#environment-configuration)
+        - [Cluster/Control Plane Creation](#clustercontrol-plane-creation)
+        - [Worker Node Creation](#worker-node-creation)
+        - [Private ECR Pull Allowlist](#private-ecr-pull-allowlist)
+        - [Security Model](#security-model)
+        - [Cluster/Worker Info and Refreshing the sbxctl Config](#clusterworker-info-and-refreshing-the-sbxctl-config)
+        - [Cluster/Worker Deletion](#clusterworker-deletion)
+        - [Example Creation of a Cluster and Worker Node](#example-creation-of-a-cluster-and-worker-node)
 - [Resource Model/Objects](#resource-modelobjects)
     - [Node](#node)
     - [External](#external)
@@ -57,7 +66,7 @@
 - [Appendix D. API Documentation](#appendix-d-api-documentation)
 - [Appendix E. FAQ, Troubleshooting and Best Practices](#appendix-e-faq-troubleshooting-and-best-practices)
 - [Appendix F. Contribution and Contributors](#appendix-f-contribution-and-contributors)
-- [Appendix G. License](#appendix-g-license)
+- [Appendix G. MIT License](#appendix-g-mit-license)
 
 ---
 
@@ -252,6 +261,298 @@ The main available commands are as follows:
 - `delete`: Used to delete resources. For example: `sbxctl delete node/sandboxd-node-1`. A specific resource must be explicitly specified.
 - `logs`: Used to retrieve sandbox-level logs with each line prefixed by the container name. For example: `sbxctl logs s/sbx-wordpress-demo` returns lines such as `[app] ...` and `[db] ...`. For backward compatibility, `sbxctl logs s/sbx-wordpress-demo app` still retrieves only the `app` container logs. Use `sbxctl logs s/sbx-wordpress-demo --watch` to poll logs and print newly added lines. Internally, this command uses sbxorch's Proxied API to send requests directly to the sbxlet instance running on the target node and retrieve logs.
 
+## Sandboxd Admin CLI(sbxadm)
+
+`sbxadm` is an administrative CLI for provisioning and managing entire Sandboxd-O clusters — both the control plane (sbxorch) and worker nodes (sbxlet).
+It currently targets AWS EC2-based clusters, with support for other cloud providers and on-premises environments planned for the future.
+
+Unlike `sbxctl`, which is a client that talks to the sbxorch API, `sbxadm` provisions real infrastructure directly via the AWS SDK for Go — EC2 instances, security groups, IAM instance profiles, Elastic IPs — and persists that state in DynamoDB. It does not rely on a separate IaC tool such as Terraform or CloudFormation.
+
+```
+Sandboxd-O Admin: provisions sbxorch/sbxlet clusters on AWS
+
+Usage:
+  sbxadm [command]
+
+Available Commands:
+  completion           Generate the autocompletion script for the specified shell
+  create               Create a cluster or worker node
+  delete               Delete a worker node or an entire cluster
+  help                 Help about any command
+  info                 Show detailed cluster/worker information
+  update-sbxctl-config Refresh /var/lib/sandboxd/sbxctl_config.json on a cluster's public control plane
+
+Flags:
+      --env-file string      path to a KEY=VALUE env file (e.g. SBXADM_STORE_DYNAMODB, SBXADM_ORCH_SERVER)
+  -h, --help                 help for sbxadm
+      --no-color             disable colored output (also honors NO_COLOR env var)
+      --orch-server string   override orchestrator base URL (env: SBXADM_ORCH_SERVER; default: derived from the cluster's control plane IP)
+      --profile string       AWS profile (env: AWS_PROFILE, default: default)
+      --region string        AWS region (default: the region configured for --profile, env: AWS_REGION)
+      --store-table string   DynamoDB table for sbxadm state (env: SBXADM_STORE_DYNAMODB)
+      --timeout duration     orchestrator API request timeout (default 20s)
+
+Use "sbxadm [command] --help" for more information about a command.
+```
+
+### Environment Configuration
+
+Instead of a single JSON config file like `sbxctl`, `sbxadm` can also load the infrastructure-bootstrap settings it needs from a flat `KEY=VALUE` env file (`--env-file`; real process environment variables always take precedence over the file).
+
+```shell
+# sbxadm.env
+SBXADM_STORE_DYNAMODB=sbxadm_store
+SBXADM_ORCH_SERVER=http://<orch-public-ip>:8082
+```
+
+```shell
+sbxadm --env-file ./sbxadm.env info cluster my-cluster
+```
+
+If `--region` is omitted, `sbxadm` falls back to the region configured for `--profile` (default: `default`) — the same behavior as the AWS CLI when no `--region` flag is given.
+
+### Cluster/Control Plane Creation
+
+Exactly one control plane (sbxorch) can exist per cluster. The VPC id and the public/private subnets are all validated up front; the command fails if any of them don't exist or don't belong to that VPC.
+
+```shell
+sbxadm create cluster my-cluster \
+  --version 0.3.0 \
+  --vpc-id vpc-0123456789abcdef0 \
+  --public-subnet subnet-0aaa111,subnet-0bbb222 \
+  --private-subnet subnet-0ccc333,subnet-0ddd444 \
+  --region ap-northeast-2 \
+  --orch-instance t3.xlarge \
+  --orch-public-endpoint \
+  --orch-root-volume-size 16Gi
+```
+
+- `--orch-public-endpoint`: places the control plane in a public subnet with a public IP. Without it, the control plane lands in a private subnet with no public IP.
+- `--orch-public-eip`: attaches an existing Elastic IP by ARN or allocation id (requires `--orch-public-endpoint`). If omitted, `sbxadm` allocates and manages its own Elastic IP, so the address survives instance restarts.
+- `--orch-config`: a JSON file overlaid on top of the `configs/sbxorch_config.json` defaults. Only the keys present in the file are changed; everything else keeps the shipped default.
+- For a private control plane (no `--orch-public-endpoint`), `sbxadm` checks up front that the chosen private subnet's route table has a `0.0.0.0/0` route to a NAT gateway. If there's no NAT gateway, it fails immediately without creating any AWS resources — both SSM agent registration and downloading the GitHub release artifact require general internet egress (SSM VPC endpoints alone aren't sufficient).
+
+Creation is logged step by step in a terraform/eksctl-like style (security groups, then IAM instance profiles, then the EC2 instance). If anything fails partway through, every AWS resource created up to that point (EC2 instance, security groups, IAM profiles, Elastic IP) is automatically rolled back. Once the instance is running, `sbxadm` polls `/healthz` directly from inside the instance over SSM to confirm `sbxorch.service` actually came up before declaring the cluster created.
+
+### Worker Node Creation
+
+```shell
+sbxadm create worker my-worker-1 \
+  --cluster my-cluster \
+  --version 0.3.0 \
+  --instance t3.xlarge \
+  --root-volume-size 64Gi \
+  --external host1.example.com
+```
+
+Worker nodes always land in a public subnet, round-robined across the cluster's public subnets. If `--public-eip` is omitted, the worker's Elastic IP is also allocated and managed automatically, same as the control plane; if `--external` is omitted, that Elastic IP's address is registered as the External value automatically.
+
+If you do pass a hostname to `--external` (like `host1.example.com` above) instead of letting it default to the worker's IP, `sbxadm` only registers that value with the orchestrator — it does not create or manage any DNS record. You're responsible for pointing an A record at the worker's actual public IP (from `sbxadm info worker`) at your DNS provider yourself; see the note under [External](#external) below.
+
+Once the instance finishes bootstrapping (including installing gVisor/containerd) and passes the `sbxlet.service` health check, `sbxadm` automatically registers a Node object (and an External object, if applicable) with the sbxorch API. Deleting a worker tears down those Node/External objects along with terminating the EC2 instance.
+
+### Private ECR Pull Allowlist
+
+```shell
+sbxadm create worker my-worker-2 \
+  --cluster my-cluster \
+  --version 0.3.0 \
+  --instance t3.xlarge \
+  --ecr-repos "my-repo-1,ctf-*"
+```
+
+`--ecr-repos` grants the cluster's worker nodes pull-only access to private ECR repositories whose name matches any of the given comma-separated patterns. Patterns may mix exact names and `*` globs freely (e.g. `my-repo-1,ctf-*,other-*`); `*` is matched natively by IAM resource ARNs, so no expansion happens on the sbxadm side.
+
+All workers in a cluster share a single IAM role, so the allowlist is cluster-wide rather than per-worker: each `--ecr-repos` call merges its patterns into the cluster's existing allowlist (stored in DynamoDB) and rewrites the role's inline policy with the full, unioned set — it never removes access previously granted to other workers in the same cluster. The current allowlist is shown in `sbxadm info cluster`.
+
+On the instance side, `sbxadm`'s worker bootstrap installs the AWS CLI and a systemd timer that refreshes containerd's registry auth for the account's ECR host every 6 hours via `aws ecr get-login-password`, using the worker's own IAM role credentials — no static credentials are ever stored on the instance. Repositories that don't match any granted pattern fail to pull with a `403 Forbidden` from ECR, enforced entirely by IAM.
+
+### Security Model
+
+Instances created by `sbxadm` never receive SSH key material. Instead, their IAM instance profile is granted `AmazonSSMManagedInstanceCore`, so they're reachable only via AWS Systems Manager Session Manager (port 22 isn't opened in any security group at all). Health checks work the same way: rather than sending an HTTP request from outside, `sbxadm` runs `curl 127.0.0.1:<port>/healthz` directly inside the instance over SSM — this works identically regardless of whether the node has a public endpoint.
+
+A worker's security group only opens the host port range used by sandbox workloads to the internet (default `10000-32767`, matching `host_port_min`/`host_port_max`), and only allows traffic to the sbxlet API port (8081) from the control plane's security group. The control plane's sbxorch API port (8082) is restricted to the VPC CIDR unless `--orch-public-endpoint` was given.
+
+Communication between orch and let is authenticated with a shared secret generated automatically at cluster creation time (see [Authentication](#authentication-shared-secret) above). This value is stored in DynamoDB and injected into both components' config files automatically, so there's nothing to manage by hand.
+
+### Cluster/Worker Info and Refreshing the sbxctl Config
+
+```shell
+sbxadm info cluster my-cluster
+sbxadm info worker my-worker-1 --cluster my-cluster
+```
+
+`info cluster` prints the instance type, subnet, security group, Elastic IP (and whether it's auto-allocated or user-supplied), and the final merged JSON config for both the control plane and every worker node.
+
+By default, `sbxctl` reads its `server`/`shared_secret` values from a local file on the control plane instance, `/var/lib/sandboxd/sbxctl_config.json`. Those values only ever exist in `sbxadm`'s DynamoDB record per cluster — they're never written to a file on the instance automatically. So to use `sbxctl` directly from inside the control plane (e.g. over an SSM session), someone would otherwise have to create or fill in that file by hand.
+
+`update-sbxctl-config` does this for you: it rebuilds `sbxctl_config.json` from the cluster's own record (`server`, `shared_secret`) and overwrites `/var/lib/sandboxd/sbxctl_config.json` on the control plane instance over SSM. There's no override option — it only ever refreshes from the cluster's own state:
+
+```shell
+sbxadm update-sbxctl-config my-cluster
+```
+
+It returns an error for clusters whose control plane isn't publicly accessible.
+
+### Cluster/Worker Deletion
+
+```shell
+sbxadm delete worker my-worker-1 --cluster my-cluster
+sbxadm delete cluster my-cluster
+```
+
+`delete cluster` tears down every worker node first, then the control plane, security groups, IAM instance profiles, any auto-allocated Elastic IPs, and finally the DynamoDB record. Deleting a cluster or worker that's already gone from AWS returns an error.
+
+### Example Creation of a Cluster and Worker Node
+
+A complete, end-to-end walkthrough: provisioning the VPC `sbxadm` will deploy into entirely by hand with the AWS CLI (`sbxadm` itself never touches VPC/subnet/NAT/IGW resources — it only validates them), then creating a cluster and worker node, inspecting them, and tearing everything down again.
+
+#### 1. Create a VPC with Public/Private Subnets and a NAT Gateway
+
+`sbxadm` requires at least one public and one private subnet. A private control plane (no `--orch-public-endpoint`) additionally requires a NAT gateway reachable from that private subnet — `sbxadm` checks for this up front and refuses to create anything if it's missing (see [Cluster/Control Plane Creation](#clustercontrol-plane-creation)). This example sets one up regardless, since the worker's host-port range still needs the public subnet's route to an internet gateway.
+
+```shell
+REGION=ap-northeast-2
+
+VPC_ID=$(aws ec2 create-vpc --cidr-block 10.80.0.0/16 --region $REGION \
+  --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=sbxadm-demo-vpc}]' \
+  --query 'Vpc.VpcId' --output text)
+
+aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-support --region $REGION
+aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-hostnames --region $REGION
+
+PUB_SUBNET=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.80.1.0/24 \
+  --availability-zone ${REGION}a --region $REGION \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=sbxadm-demo-public}]' \
+  --query 'Subnet.SubnetId' --output text)
+
+PRIV_SUBNET=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.80.2.0/24 \
+  --availability-zone ${REGION}a --region $REGION \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=sbxadm-demo-private}]' \
+  --query 'Subnet.SubnetId' --output text)
+
+aws ec2 modify-subnet-attribute --subnet-id $PUB_SUBNET --map-public-ip-on-launch --region $REGION
+```
+
+Attach an internet gateway and route the public subnet's traffic through it:
+
+```shell
+IGW_ID=$(aws ec2 create-internet-gateway --region $REGION \
+  --tag-specifications 'ResourceType=internet-gateway,Tags=[{Key=Name,Value=sbxadm-demo-igw}]' \
+  --query 'InternetGateway.InternetGatewayId' --output text)
+aws ec2 attach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID --region $REGION
+
+PUB_RTB=$(aws ec2 create-route-table --vpc-id $VPC_ID --region $REGION \
+  --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=sbxadm-demo-public-rtb}]' \
+  --query 'RouteTable.RouteTableId' --output text)
+aws ec2 create-route --route-table-id $PUB_RTB --destination-cidr-block 0.0.0.0/0 --gateway-id $IGW_ID --region $REGION
+aws ec2 associate-route-table --route-table-id $PUB_RTB --subnet-id $PUB_SUBNET --region $REGION
+```
+
+Allocate an Elastic IP for the NAT gateway, create the NAT gateway in the public subnet, and route the private subnet's egress through it:
+
+```shell
+NAT_EIP_ALLOC=$(aws ec2 allocate-address --domain vpc --region $REGION \
+  --tag-specifications 'ResourceType=elastic-ip,Tags=[{Key=Name,Value=sbxadm-demo-nat-eip}]' \
+  --query 'AllocationId' --output text)
+
+NAT_GW_ID=$(aws ec2 create-nat-gateway --subnet-id $PUB_SUBNET --allocation-id $NAT_EIP_ALLOC --region $REGION \
+  --query 'NatGateway.NatGatewayId' --output text)
+aws ec2 wait nat-gateway-available --nat-gateway-ids $NAT_GW_ID --region $REGION
+
+PRIV_RTB=$(aws ec2 create-route-table --vpc-id $VPC_ID --region $REGION \
+  --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=sbxadm-demo-private-rtb}]' \
+  --query 'RouteTable.RouteTableId' --output text)
+aws ec2 create-route --route-table-id $PRIV_RTB --destination-cidr-block 0.0.0.0/0 --nat-gateway-id $NAT_GW_ID --region $REGION
+aws ec2 associate-route-table --route-table-id $PRIV_RTB --subnet-id $PRIV_SUBNET --region $REGION
+```
+
+At this point `$VPC_ID`, `$PUB_SUBNET`, and `$PRIV_SUBNET` are everything `sbxadm` needs.
+
+#### 2. (Optional) Pre-allocate a Stable Elastic IP for the Control Plane
+
+Without `--orch-public-eip`, `sbxadm` allocates and manages its own Elastic IP automatically — which is enough for most use cases and is what the rest of this walkthrough uses. If you instead want to reuse a specific, pre-existing Elastic IP (e.g. one already allow-listed somewhere external), allocate it yourself and pass its allocation id or ARN; `sbxadm` will only ever associate/disassociate it, never release it, since it didn't create it:
+
+```shell
+ORCH_EIP_ALLOC=$(aws ec2 allocate-address --domain vpc --region $REGION \
+  --tag-specifications 'ResourceType=elastic-ip,Tags=[{Key=Name,Value=sbxadm-demo-orch-eip}]' \
+  --query 'AllocationId' --output text)
+echo "$ORCH_EIP_ALLOC"
+```
+
+#### 3. Create the Cluster
+
+```shell
+sbxadm create cluster my-cluster \
+  --version 0.3.0 \
+  --vpc-id "$VPC_ID" \
+  --public-subnet "$PUB_SUBNET" \
+  --private-subnet "$PRIV_SUBNET" \
+  --region "$REGION" \
+  --orch-instance t3.xlarge \
+  --orch-public-endpoint \
+  --orch-public-eip "$ORCH_EIP_ALLOC" \
+  --orch-root-volume-size 16Gi
+```
+
+Drop `--orch-public-eip "$ORCH_EIP_ALLOC"` entirely to let `sbxadm` allocate and manage the control plane's Elastic IP itself instead (the simpler, recommended default). This step blocks until `sbxorch.service`'s `/healthz` check passes over SSM before returning — see [Security Model](#security-model).
+
+#### 4. Create a Worker Node
+
+```shell
+sbxadm create worker my-worker-1 \
+  --cluster my-cluster \
+  --version 0.3.0 \
+  --instance t3.xlarge \
+  --root-volume-size 64Gi \
+  --ecr-repos "my-repo-1,ctf-*" \
+  --external host1.example.com
+```
+
+As with the control plane, omitting `--public-eip` lets `sbxadm` allocate and manage the worker's Elastic IP automatically. This also blocks until `sbxlet.service` is healthy, then registers the worker as a Node (and an External object, since `--external` was given) with the orchestrator automatically.
+
+`--external host1.example.com` only registers that hostname with the orchestrator; it doesn't create the DNS record itself. After this step, look up the worker's public IP via `sbxadm info worker my-worker-1 --cluster my-cluster` and add an A record for `host1.example.com` pointing to it at your DNS provider.
+
+#### 5. Inspect and Manage
+
+```shell
+sbxadm info cluster my-cluster
+sbxadm info worker my-worker-1 --cluster my-cluster
+
+# Refresh sbxctl_config.json on the control plane so an operator can SSM into it
+# and run sbxctl directly, without hand-editing that file.
+sbxadm update-sbxctl-config my-cluster
+```
+
+#### 6. Clean Up
+
+```shell
+sbxadm delete worker my-worker-1 --cluster my-cluster
+sbxadm delete cluster my-cluster
+```
+
+This terminates both EC2 instances, deletes the security groups and IAM instance profiles, and releases any Elastic IPs `sbxadm` itself allocated (an `--orch-public-eip`/`--public-eip` you supplied is only disassociated, never released). It does **not** touch the VPC/subnets/NAT gateway/IGW from step 1, since `sbxadm` never created them:
+
+```shell
+aws ec2 release-address --allocation-id "$ORCH_EIP_ALLOC" --region $REGION  # only if you allocated this in step 2
+
+aws ec2 delete-nat-gateway --nat-gateway-id $NAT_GW_ID --region $REGION
+aws ec2 wait nat-gateway-deleted --nat-gateway-ids $NAT_GW_ID --region $REGION
+aws ec2 release-address --allocation-id $NAT_EIP_ALLOC --region $REGION
+
+aws ec2 disassociate-route-table --association-id $(aws ec2 describe-route-tables --region $REGION --route-table-ids $PRIV_RTB --query 'RouteTables[0].Associations[0].RouteTableAssociationId' --output text) --region $REGION
+aws ec2 delete-route-table --route-table-id $PRIV_RTB --region $REGION
+aws ec2 disassociate-route-table --association-id $(aws ec2 describe-route-tables --region $REGION --route-table-ids $PUB_RTB --query 'RouteTables[0].Associations[0].RouteTableAssociationId' --output text) --region $REGION
+aws ec2 delete-route-table --route-table-id $PUB_RTB --region $REGION
+
+aws ec2 detach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID --region $REGION
+aws ec2 delete-internet-gateway --internet-gateway-id $IGW_ID --region $REGION
+
+aws ec2 delete-subnet --subnet-id $PUB_SUBNET --region $REGION
+aws ec2 delete-subnet --subnet-id $PRIV_SUBNET --region $REGION
+aws ec2 delete-vpc --vpc-id $VPC_ID --region $REGION
+```
+
 # Resource Model / Objects
 
 The resource model in this project is designed to resemble Kubernetes' resource model but is simplified to better fit sandbox environments.
@@ -318,6 +619,10 @@ spec:
 The `node_id` field specifies the ID of the Node referenced by this External resource, and the `external` field represents the externally reachable endpoint associated with that node.
 
 If this object is not configured, the accessible Public IP address or hostname for that node will be displayed as `(none)`.
+
+> [!NOTE]
+>
+> Registering a hostname (instead of a raw IP) as `external` is purely informational — sandboxd-o does not manage DNS for you. If you set `external` to a domain name, you must separately create an A record for it at your external DNS provider, pointing to that node's actual public IP. Until that A record exists and propagates, the hostname won't actually resolve to the node, even though it's correctly registered here.
 
 ```shell
 > sbxctl get external
@@ -613,9 +918,9 @@ Likewise, when a sandbox is deleted through sbxorch, its state transitions to `D
 
 > [!NOTE]
 >
-> 만약 컨테이너별 의존성이 필요할 경우, `wordpress.yaml`의 예제와 같이 컨테이너의 `args` 필드에 커스텀 스크립트를 작성하여 의존성 체크 및 대기 로직을 구현하는 방식을 권장합니다. 예를 들어, WordPress 컨테이너가 MySQL 컨테이너에 의존성이 있는 경우, WordPress 컨테이너의 `args`에 MySQL이 준비될 때까지 대기하는 스크립트를 작성할 수 있습니다.
+> If container-level dependencies are required, it is recommended to implement dependency checks and wait logic through custom scripts in the container's `args` field, as shown in the `wordpress.yaml` example. For example, if the WordPress container depends on the MySQL container, the WordPress container can include a script in `args` that waits until MySQL is ready.
 >
-> 이는 위 Readiness Probe와는 다른 방식으로, Readiness Probe는 샌드박스의 상태를 `Running`으로 전환하기 위한 TCP Dial 또는 HTTP Get Health Check 등의 헬스 체크 메커니즘을 제공하지만, 컨테이너 간의 의존성이나 준비 상태를 직접적으로 관리하는 기능은 제공하지 않습니다.
+> This is separate from the Readiness Probe described above. The Readiness Probe provides health-check mechanisms such as TCP Dial or HTTP GET checks to transition the sandbox state to `Running`, but it does not directly manage dependencies or readiness between containers.
 
 This information can be checked using commands such as `sbxctl get sandboxes` or `sbxctl get sandboxes/:ID`, or through the API.
 

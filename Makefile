@@ -4,14 +4,16 @@ BIN_DIR := ./build
 SBXLET_BIN := $(BIN_DIR)/sbxlet
 SBXORCH_BIN := $(BIN_DIR)/sbxorch
 SBXCTL_BIN := $(BIN_DIR)/sbxctl
+SBXADM_BIN := $(BIN_DIR)/sbxadm
 SWAG := $(or $(shell command -v swag 2>/dev/null),$(shell go env GOPATH)/bin/swag)
 
 SBXLET_CMD := ./cmd/sbxlet
 SBXORCH_CMD := ./cmd/sbxorch
 SBXCTL_CMD := ./cmd/sbxctl
+SBXADM_CMD := ./cmd/sbxadm
 
-.PHONY: help fmt vet test test-cover build build-sbxlet build-sbxorch build-sbxctl clean swagger swagger-sbxlet swagger-sbxorch \
-	run-sbxlet run-sbxorch run-sbxctl install \
+.PHONY: help fmt vet test test-cover build build-sbxlet build-sbxorch build-sbxctl build-sbxadm clean swagger swagger-sbxlet swagger-sbxorch \
+	run-sbxlet run-sbxorch run-sbxctl run-sbxadm install \
 	start-sbxlet stop-sbxlet start-sbxorch stop-sbxorch
 
 help:
@@ -24,12 +26,14 @@ help:
 	@echo "  make build-sbxlet       - build sbxlet binary"
 	@echo "  make build-sbxorch      - build sbxorch binary"
 	@echo "  make build-sbxctl       - build sbxctl binary"
+	@echo "  make build-sbxadm       - build sbxadm binary"
 	@echo "  make swagger            - generate swagger docs for sbxlet + sbxorch"
 	@echo "  make swagger-sbxlet     - generate swagger docs for sbxlet"
 	@echo "  make swagger-sbxorch    - generate swagger docs for sbxorch"
 	@echo "  make run-sbxlet         - run sbxlet"
 	@echo "  make run-sbxorch        - run sbxorch"
 	@echo "  make run-sbxctl         - run sbxctl (pass ARGS='...')"
+	@echo "  make run-sbxadm         - run sbxadm (pass ARGS='...')"
 	@echo "  make clean              - remove build artifacts"
 	@echo "  make install            - run scripts/install.sh"
 	@echo "  make start-sbxlet       - start sbxlet in background (/tmp/sbxlet.log)"
@@ -49,7 +53,7 @@ test:
 test-cover:
 	@go test -p=1 -v -coverprofile=coverage.out ./...
 
-build: build-sbxlet build-sbxorch build-sbxctl
+build: build-sbxlet build-sbxorch build-sbxctl build-sbxadm
 
 build-sbxlet:
 	@mkdir -p $(BIN_DIR)
@@ -62,6 +66,10 @@ build-sbxorch:
 build-sbxctl:
 	@mkdir -p $(BIN_DIR)
 	@go build -o $(SBXCTL_BIN) $(SBXCTL_CMD)
+
+build-sbxadm:
+	@mkdir -p $(BIN_DIR)
+	@go build -o $(SBXADM_BIN) $(SBXADM_CMD)
 
 swagger: swagger-sbxlet swagger-sbxorch
 
@@ -82,6 +90,9 @@ run-sbxorch:
 
 run-sbxctl:
 	@go run $(SBXCTL_CMD) $(ARGS)
+
+run-sbxadm:
+	@go run $(SBXADM_CMD) $(ARGS)
 
 install:
 	@./scripts/install.sh

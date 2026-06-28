@@ -1,0 +1,7 @@
+{
+    "server": "http://10.10.0.1:8082",
+    "shared_secret": "MY_SHARED_SECRET",
+    "timeout": "10s",
+    "output": "",
+    "limit": 100
+}

@@ -7,7 +7,6 @@ OUT_NAME="${1:-sbx-build-artifacts.zip}"
 OUT_PATH="${OUT_DIR}/${OUT_NAME}"
 
 REQUIRED_FILES=(
-  "scripts/build-ami-sbx-install.sh"
   "scripts/install.sh"
 )
 
@@ -50,7 +49,6 @@ mkdir -p "${STAGING_DIR}/scripts"
 mkdir -p "${STAGING_DIR}/configs"
 
 cp -a build/. "${STAGING_DIR}/build/"
-cp -a scripts/build-ami-sbx-install.sh "${STAGING_DIR}/scripts/"
 cp -a scripts/install.sh "${STAGING_DIR}/scripts/"
 cp -a configs/. "${STAGING_DIR}/configs/"
 
