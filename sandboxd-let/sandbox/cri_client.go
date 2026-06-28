@@ -4,18 +4,31 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 
+	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
+// defaultPullTimeout bounds a deduplicated pull when the caller's context
+// carries no deadline.
+const defaultPullTimeout = 8 * time.Minute
 
 type criClient struct {
 	conn    *grpc.ClientConn
 	runtime runtimeapi.RuntimeServiceClient
 	image   runtimeapi.ImageServiceClient
+
+	// pullGroup collapses concurrent pulls of the same image reference on
+	// this node into a single in-flight PullImage, so launching many
+	// sandboxes that share an uncached image doesn't fan out into N
+	// identical registry pulls.
+	pullGroup singleflight.Group
 }
 
 type criContainerDetails struct {
@@ -57,10 +70,45 @@ func (c *criClient) pullImage(ctx context.Context, image string) error {
 		return nil
 	}
 
-	_, err := c.image.PullImage(ctx, &runtimeapi.PullImageRequest{
-		Image: &runtimeapi.ImageSpec{Image: image},
+	// Deduplicate concurrent pulls of the same reference: only one
+	// PullImage runs, the rest wait for and share its result.
+	ch := c.pullGroup.DoChan(image, func() (any, error) {
+		// Detach from the triggering caller's context so that caller
+		// cancelling/timing out doesn't abort the shared pull for the
+		// other waiters; re-bound it with the caller's remaining deadline.
+		timeout := defaultPullTimeout
+		if dl, ok := ctx.Deadline(); ok {
+			if remaining := time.Until(dl); remaining > 0 {
+				timeout = remaining
+			}
+		}
+
+		pullCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+		defer cancel()
+
+		// Logged once per real (deduplicated) pull, so concurrent sandboxes
+		// sharing an image produce a single "pulling image" line.
+		slog.Info("pulling image", slog.String("image", image))
+		start := time.Now()
+		_, err := c.image.PullImage(pullCtx, &runtimeapi.PullImageRequest{
+			Image: &runtimeapi.ImageSpec{Image: image},
+		})
+		if err != nil {
+			slog.Warn("image pull failed", slog.String("image", image), slog.String("error", err.Error()))
+			return nil, err
+		}
+		slog.Info("image pulled", slog.String("image", image), slog.String("duration", time.Since(start).String()))
+		return nil, nil
 	})
-	return err
+
+	select {
+	case <-ctx.Done():
+		// This caller gives up, but the shared pull keeps running for the
+		// remaining waiters.
+		return ctx.Err()
+	case res := <-ch:
+		return res.Err
+	}
 }
 
 func (c *criClient) runPodSandbox(ctx context.Context, cfg *runtimeapi.PodSandboxConfig, runtimeHandler string) (string, error) {
