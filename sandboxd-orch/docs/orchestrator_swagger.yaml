@@ -75,6 +75,10 @@ definitions:
         type: string
       resource:
         $ref: '#/definitions/model.ResourceSpec'
+      volumeMounts:
+        items:
+          $ref: '#/definitions/model.VolumeMount'
+        type: array
       workDir:
         type: string
     type: object
@@ -94,6 +98,10 @@ definitions:
         type: array
       readinessProbe:
         $ref: '#/definitions/model.ReadinessProbeSpec'
+      volumes:
+        items:
+          $ref: '#/definitions/model.VolumeSpec'
+        type: array
     type: object
   model.PortMapping:
     properties:
@@ -130,6 +138,22 @@ definitions:
       ephemeralStorage:
         type: string
       memory:
+        type: string
+    type: object
+  model.VolumeMount:
+    properties:
+      mountPath:
+        type: string
+      name:
+        type: string
+      readOnly:
+        type: boolean
+    type: object
+  model.VolumeSpec:
+    properties:
+      ephemeralStorage:
+        type: string
+      name:
         type: string
     type: object
   types.CreateExternalObjectRequest:
@@ -186,6 +210,8 @@ definitions:
         $ref: '#/definitions/types.NodeState'
       success_streak:
         type: integer
+      unschedulable:
+        type: boolean
       updated_at:
         type: string
     type: object
@@ -195,6 +221,8 @@ definitions:
         type: string
       port:
         type: integer
+      unschedulable:
+        type: boolean
     type: object
   types.NodeResources:
     properties:
@@ -229,6 +257,16 @@ definitions:
     - NodeStateUnknown
     - NodeStateReady
     - NodeStateNotReady
+  types.PatchNodeObjectRequest:
+    properties:
+      spec:
+        $ref: '#/definitions/types.PatchNodeObjectSpec'
+    type: object
+  types.PatchNodeObjectSpec:
+    properties:
+      unschedulable:
+        type: boolean
+    type: object
   types.ReadinessProbeSpec:
     properties:
       failure_threshold:
@@ -279,6 +317,10 @@ definitions:
         type: string
       resource:
         $ref: '#/definitions/types.SandboxResource'
+      volume_mounts:
+        items:
+          $ref: '#/definitions/types.SandboxVolumeMount'
+        type: array
       work_dir:
         type: string
     type: object
@@ -339,6 +381,10 @@ definitions:
         $ref: '#/definitions/types.ReadinessProbeSpec'
       ttl_seconds:
         type: integer
+      volumes:
+        items:
+          $ref: '#/definitions/types.SandboxVolumeSpec'
+        type: array
     type: object
   types.SandboxStatus:
     properties:
@@ -357,6 +403,22 @@ definitions:
       phase:
         $ref: '#/definitions/types.SandboxPhase'
       sandboxd_id:
+        type: string
+    type: object
+  types.SandboxVolumeMount:
+    properties:
+      mount_path:
+        type: string
+      name:
+        type: string
+      read_only:
+        type: boolean
+    type: object
+  types.SandboxVolumeSpec:
+    properties:
+      ephemeral_storage:
+        type: string
+      name:
         type: string
     type: object
 info:
@@ -497,6 +559,44 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Get node
+      tags:
+      - orchestrator-node
+    patch:
+      consumes:
+      - application/json
+      description: Updates node scheduling policy fields such as spec.unschedulable.
+      parameters:
+      - description: Node id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Node patch request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/types.PatchNodeObjectRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.NodeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update node scheduling policy
       tags:
       - orchestrator-node
   /api/v1/nodes/{id}/heartbeat:
