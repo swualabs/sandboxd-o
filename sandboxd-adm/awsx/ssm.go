@@ -36,15 +36,16 @@ func WaitForSSMOnline(ctx context.Context, c *ssm.Client, instanceID string, tim
 }
 
 // RunShellCommand does not fail on a non-zero remote exit code; check the
-// returned status.
-func RunShellCommand(ctx context.Context, c *ssm.Client, instanceID string, commands []string, timeout time.Duration) (stdout string, status string, err error) {
+// returned status. Remote stderr is returned alongside stdout so callers can
+// surface failure detail.
+func RunShellCommand(ctx context.Context, c *ssm.Client, instanceID string, commands []string, timeout time.Duration) (stdout string, stderr string, status string, err error) {
 	send, err := c.SendCommand(ctx, &ssm.SendCommandInput{
 		InstanceIds:  []string{instanceID},
 		DocumentName: aws.String("AWS-RunShellScript"),
 		Parameters:   map[string][]string{"commands": commands},
 	})
 	if err != nil {
-		return "", "", fmt.Errorf("send ssm command to %s: %w", instanceID, err)
+		return "", "", "", fmt.Errorf("send ssm command to %s: %w", instanceID, err)
 	}
 	commandID := aws.ToString(send.Command.CommandId)
 
@@ -58,17 +59,17 @@ func RunShellCommand(ctx context.Context, c *ssm.Client, instanceID string, comm
 			switch inv.Status {
 			case ssmtypes.CommandInvocationStatusSuccess, ssmtypes.CommandInvocationStatusFailed,
 				ssmtypes.CommandInvocationStatusCancelled, ssmtypes.CommandInvocationStatusTimedOut:
-				return aws.ToString(inv.StandardOutputContent), string(inv.Status), nil
+				return aws.ToString(inv.StandardOutputContent), aws.ToString(inv.StandardErrorContent), string(inv.Status), nil
 			}
 		}
 
 		if time.Now().After(deadline) {
-			return "", "", fmt.Errorf("timed out waiting for ssm command %s on %s", commandID, instanceID)
+			return "", "", "", fmt.Errorf("timed out waiting for ssm command %s on %s", commandID, instanceID)
 		}
 
 		select {
 		case <-ctx.Done():
-			return "", "", ctx.Err()
+			return "", "", "", ctx.Err()
 		case <-time.After(4 * time.Second):
 		}
 	}
@@ -97,7 +98,7 @@ echo SBX_NOT_HEALTHY
 exit 1
 `, deadlineSecs, port)
 
-	stdout, status, err := RunShellCommand(ctx, c, instanceID, []string{script}, timeout+30*time.Second)
+	stdout, _, status, err := RunShellCommand(ctx, c, instanceID, []string{script}, timeout+30*time.Second)
 	if err != nil {
 		return err
 	}

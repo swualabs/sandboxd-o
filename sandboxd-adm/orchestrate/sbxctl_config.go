@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"time"
 
 	"sandboxd-o/sandboxd-adm/awsx"
@@ -47,22 +48,26 @@ func UpdateSbxctlConfig(ctx context.Context, ssmc *ssm.Client, st *store.Store, 
 
 	s.Step("pushing sbxctl_config.json to control plane %s via SSM", cluster.ControlPlane.InstanceID)
 	b64 := base64.StdEncoding.EncodeToString([]byte(configJSON))
+	dst := "/var/lib/sandboxd/sbxctl_config.json"
 	commands := []string{
+		"set -e",
 		"mkdir -p /var/lib/sandboxd",
-		fmt.Sprintf("echo %s | base64 -d > /var/lib/sandboxd/sbxctl_config.json", b64),
-		"chmod 0644 /var/lib/sandboxd/sbxctl_config.json",
-		"echo DONE",
+		fmt.Sprintf("echo %s | base64 -d > %s.tmp", b64, dst),
+		fmt.Sprintf("test -s %s.tmp", dst),
+		fmt.Sprintf("chmod 0644 %s.tmp", dst),
+		fmt.Sprintf("mv -f %s.tmp %s", dst, dst),
+		fmt.Sprintf("echo WROTE $(wc -c < %s) bytes", dst),
 	}
 
-	stdout, status, err := awsx.RunShellCommand(ctx, ssmc, cluster.ControlPlane.InstanceID, commands, 30*time.Second)
+	stdout, stderr, status, err := awsx.RunShellCommand(ctx, ssmc, cluster.ControlPlane.InstanceID, commands, 30*time.Second)
 	if err != nil {
 		return err
 	}
 
 	if status != "Success" {
-		return fmt.Errorf("pushing sbxctl_config.json failed (ssm status=%s): %s", status, stdout)
+		return fmt.Errorf("pushing sbxctl_config.json failed (ssm status=%s): stdout=%q stderr=%q", status, stdout, stderr)
 	}
-	s.Done("sbxctl_config.json updated on %s", cluster.ControlPlane.InstanceID)
+	s.Done("sbxctl_config.json updated on %s (%s)", cluster.ControlPlane.InstanceID, strings.TrimSpace(stdout))
 
 	return nil
 }
