@@ -37,12 +37,12 @@ func newFakeRepo(nodes ...types.Node) *fakeRepo {
 
 func (r *fakeRepo) Close() error { return nil }
 
-func (r *fakeRepo) UpsertNode(ctx context.Context, name, ip string, port int, source string) error {
+func (r *fakeRepo) UpsertNode(ctx context.Context, name, ip string, port int, unschedulable bool, source string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	n := r.nodes[name]
-	n.ID, n.IP, n.Port, n.Source = name, ip, port, source
+	n.ID, n.IP, n.Port, n.Source, n.Unschedulable = name, ip, port, source, unschedulable
 	n.SbxletBaseURL = "http://" + ip + ":" + "18080"
 	r.nodes[name] = n
 	return nil
@@ -109,6 +109,20 @@ func (r *fakeRepo) UpdateNodeResources(ctx context.Context, name string, res typ
 	r.nodes[name] = n
 	r.resourceUpdates++
 
+	return nil
+}
+
+func (r *fakeRepo) SetNodeUnschedulable(ctx context.Context, name string, unschedulable bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	n, ok := r.nodes[name]
+	if !ok {
+		return sql.ErrNoRows
+	}
+
+	n.Unschedulable = unschedulable
+	r.nodes[name] = n
 	return nil
 }
 
@@ -235,8 +249,9 @@ func TestCreateNodeAndExternalObjects(t *testing.T) {
 	if _, err := s.CreateNodeObject(context.Background(), types.CreateNodeObjectRequest{
 		ID: "n-ext",
 		Spec: types.NodeObjectSpec{
-			IP:   "127.0.0.1",
-			Port: 8081,
+			IP:            "127.0.0.1",
+			Port:          8081,
+			Unschedulable: true,
 		},
 	}); err != nil {
 		t.Fatalf("CreateNodeObject err=%v", err)
@@ -256,8 +271,39 @@ func TestCreateNodeAndExternalObjects(t *testing.T) {
 		t.Fatalf("external=%q", n.Resources.External)
 	}
 
+	if !n.Unschedulable {
+		t.Fatal("expected node to be unschedulable")
+	}
+
 	if err := s.UpsertExternalObject(context.Background(), types.CreateExternalObjectRequest{}); err == nil {
 		t.Fatal("expected validation error")
+	}
+}
+
+func TestPatchNodeObject(t *testing.T) {
+	r := newFakeRepo(types.Node{ID: "n1", IP: "127.0.0.1", Port: 8081})
+	s := testSvc(r, config.Config{})
+
+	enabled := true
+	n, err := s.PatchNodeObject(context.Background(), "n1", types.PatchNodeObjectRequest{
+		Spec: types.PatchNodeObjectSpec{Unschedulable: &enabled},
+	})
+	if err != nil {
+		t.Fatalf("PatchNodeObject err=%v", err)
+	}
+
+	if !n.Unschedulable {
+		t.Fatal("expected node to be unschedulable after patch")
+	}
+
+	if _, err := s.PatchNodeObject(context.Background(), "n1", types.PatchNodeObjectRequest{}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected invalid input for empty patch, got=%v", err)
+	}
+
+	if _, err := s.PatchNodeObject(context.Background(), "missing", types.PatchNodeObjectRequest{
+		Spec: types.PatchNodeObjectSpec{Unschedulable: &enabled},
+	}); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("expected not found for missing node, got=%v", err)
 	}
 }
 

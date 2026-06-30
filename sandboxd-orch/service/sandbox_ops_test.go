@@ -62,6 +62,8 @@ func newServiceWithNode(t *testing.T, sandboxd *httptest.Server) *Service {
 	return s
 }
 
+func boolPtr(v bool) *bool { return &v }
+
 func TestSandboxCreateAndSchedule_DynamicPort(t *testing.T) {
 	var createCalls int
 	sbxNode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1107,6 +1109,52 @@ func TestDeleteNode_MarksScheduledOrRunningSandboxFailed(t *testing.T) {
 
 	if len(used) != 0 {
 		t.Fatalf("node reserved ports should be released, got=%v", used)
+	}
+}
+
+func TestScheduler_SkipsUnschedulableNode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/sandboxes" {
+			t.Fatal("scheduler should not create sandbox on unschedulable node")
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	s := newServiceWithNode(t, server)
+	defer s.Close()
+
+	if _, err := s.PatchNodeObject(context.Background(), "n1", types.PatchNodeObjectRequest{
+		Spec: types.PatchNodeObjectSpec{Unschedulable: boolPtr(true)},
+	}); err != nil {
+		t.Fatalf("PatchNodeObject err=%v", err)
+	}
+
+	_, _ = s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
+		ID: "sbx-unsched",
+		Spec: types.SandboxSpec{
+			Ports:      []types.SandboxPortSpec{{ContainerPort: 80, Protocol: "tcp"}},
+			Containers: []types.SandboxContainerSpec{{Name: "c", Image: "nginx", Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"}}},
+		},
+	})
+
+	s.runSchedulerOnce(context.Background())
+
+	got, err := s.GetSandbox(context.Background(), "sbx-unsched")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Status.Phase != types.SandboxPhaseFailed {
+		t.Fatalf("phase=%s", got.Status.Phase)
+	}
+
+	if got.Status.NodeName != "" {
+		t.Fatalf("node expected empty, got=%s", got.Status.NodeName)
+	}
+
+	if got.Status.LastError != "no feasible schedulable node for resources/ports" {
+		t.Fatalf("last_error=%q", got.Status.LastError)
 	}
 }
 

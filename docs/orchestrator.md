@@ -44,7 +44,8 @@ Create or update a node object.
     "id": "node-a",
     "spec": {
         "ip": "192.168.0.3",
-        "port": 8080
+        "port": 8080,
+        "unschedulable": false
     }
 }
 ```
@@ -57,6 +58,7 @@ Create or update a node object.
         "id": "node-a",
         "ip": "192.168.0.3",
         "port": 8080,
+        "unschedulable": false,
         "state": "Unknown",
         "source": "api",
         "success_streak": 0,
@@ -96,6 +98,7 @@ List all registered nodes.
             "name": "node-a",
             "ip": "192.168.0.3",
             "port": 8080,
+            "unschedulable": false,
             "state": "Ready",
             "source": "api",
             "last_error": "",
@@ -138,6 +141,7 @@ Get a single node.
         "name": "node-a",
         "ip": "192.168.0.3",
         "port": 8080,
+        "unschedulable": false,
         "state": "Ready",
         "source": "api",
         "success_streak": 2,
@@ -152,6 +156,41 @@ Get a single node.
     }
 }
 ```
+
+### PATCH /api/v1/nodes/{name}
+
+Update mutable node scheduling policy fields.
+
+- Success: `200 OK`
+- Failure: `400 Bad Request` (invalid request body)
+- Failure: `404 Not Found` (`node not found`)
+- Failure: `500 Internal Server Error`
+
+**Request**
+
+```json
+{
+    "spec": {
+        "unschedulable": true
+    }
+}
+```
+
+**Response**
+
+```json
+{
+    "node": {
+        "id": "node-a",
+        "ip": "192.168.0.3",
+        "port": 8081,
+        "unschedulable": true,
+        "state": "Ready"
+    }
+}
+```
+
+`unschedulable` only affects future scheduling decisions. Existing sandboxes on the node continue running and can still be inspected or deleted normally.
 
 ### DELETE /api/v1/nodes/{name}
 

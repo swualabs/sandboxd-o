@@ -60,9 +60,9 @@ func printSandboxTableWide(w io.Writer, items []map[string]string) {
 
 func printNodeTable(w io.Writer, items []map[string]string) {
 	tw := tabwriter.NewWriter(w, 0, 8, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "NAME\tSTATE\tIP\tPORT\tEXTERNAL\tUPDATED")
+	_, _ = fmt.Fprintln(tw, "NAME\tSTATE\tSCHEDULABLE\tIP\tPORT\tEXTERNAL\tUPDATED")
 	for _, it := range items {
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", it["name"], it["state"], it["ip"], it["port"], it["external"], it["updated"])
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", it["name"], it["state"], it["schedulable"], it["ip"], it["port"], it["external"], it["updated"])
 	}
 
 	_ = tw.Flush()
@@ -70,12 +70,12 @@ func printNodeTable(w io.Writer, items []map[string]string) {
 
 func printNodeTableWide(w io.Writer, items []map[string]string) {
 	tw := tabwriter.NewWriter(w, 0, 8, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "NAME\tSTATE\tIP\tPORT\tEXTERNAL\tCPU(ALLOC/USED/AVAIL)\tMEM(ALLOC/USED/AVAIL)\tLAST_ERROR\tHEARTBEAT\tUPDATED")
+	_, _ = fmt.Fprintln(tw, "NAME\tSTATE\tSCHEDULABLE\tIP\tPORT\tEXTERNAL\tCPU(ALLOC/USED/AVAIL)\tMEM(ALLOC/USED/AVAIL)\tLAST_ERROR\tHEARTBEAT\tUPDATED")
 	for _, it := range items {
 		_, _ = fmt.Fprintf(
 			tw,
-			"%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			it["name"], it["state"], it["ip"], it["port"], it["external"], it["cpu"], it["mem"], it["last_error"], it["last_heartbeat"], it["updated"],
+			"%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			it["name"], it["state"], it["schedulable"], it["ip"], it["port"], it["external"], it["cpu"], it["mem"], it["last_error"], it["last_heartbeat"], it["updated"],
 		)
 	}
 
@@ -207,6 +207,7 @@ func extractNodeRows(items any) []map[string]string {
 		rows = append(rows, map[string]string{
 			"name":           id,
 			"state":          toString(m["state"]),
+			"schedulable":    formatSchedulable(m["unschedulable"]),
 			"ip":             toString(m["ip"]),
 			"port":           toString(m["port"]),
 			"external":       toString(res["external"]),
@@ -230,6 +231,13 @@ func extractNodeRows(items any) []map[string]string {
 
 	sort.Slice(rows, func(i, j int) bool { return rows[i]["name"] < rows[j]["name"] })
 	return rows
+}
+
+func formatSchedulable(v any) string {
+	if toString(v) == "true" {
+		return "No"
+	}
+	return "Yes"
 }
 
 func extractExternalRows(items any) []map[string]string {

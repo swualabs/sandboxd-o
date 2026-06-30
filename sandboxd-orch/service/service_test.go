@@ -33,7 +33,7 @@ func newTestService(t *testing.T, baseURL string) *Service {
 	}
 
 	if baseURL != "" {
-		_ = s.repo.UpsertNode(context.Background(), "n1", baseURL[7:len(baseURL)-5], 18080, "api")
+		_ = s.repo.UpsertNode(context.Background(), "n1", baseURL[7:len(baseURL)-5], 18080, false, "api")
 	}
 
 	return s

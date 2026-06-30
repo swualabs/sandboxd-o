@@ -81,6 +81,44 @@ func (h *Handler) CreateNodeObject(c *gin.Context) {
 	c.JSON(http.StatusOK, NodeResponse{Node: n})
 }
 
+// PatchNode godoc
+// @Summary Update node scheduling policy
+// @Description Updates node scheduling policy fields such as spec.unschedulable.
+// @Tags orchestrator-node
+// @Accept json
+// @Produce json
+// @Param id path string true "Node id"
+// @Param request body types.PatchNodeObjectRequest true "Node patch request"
+// @Success 200 {object} NodeResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/nodes/{id} [patch]
+func (h *Handler) PatchNode(c *gin.Context) {
+	var req types.PatchNodeObjectRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	n, err := h.svc.PatchNodeObject(c.Request.Context(), c.Param("id"), req)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidInput) {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+			return
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: "node not found"})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, NodeResponse{Node: n})
+}
+
 // UpsertExternalObject godoc
 // @Summary Create/Update external object
 // @Description Sets a single external endpoint for one node (1:1 per node).

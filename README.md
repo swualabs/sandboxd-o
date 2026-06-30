@@ -176,6 +176,10 @@ SQLite was chosen because it is a lightweight file-based database, and distribut
 By default, the database is created at `/var/lib/sandboxd/orchestrator.db` and acts as the Source of Truth for managing sandbox resources as well as resources such as Node and External.
 
 > [!NOTE]
+> 
+> SQLite schema changes are applied through a centralized migration list in `sandboxd-orch/repo/migrations.go`. New schema changes should be added there so upgrades remain explicit and testable.
+
+> [!NOTE]
 >
 > etcd was considered during the early stages of development, but was deferred because the operational overhead and complexity were not considered appropriate for the scale of this project.
 >
@@ -226,12 +230,14 @@ Usage:
 
 Available Commands:
   completion  Generate the autocompletion script for the specified shell
+  cordon      Mark node unschedulable
   create      Create resource from YAML file
   delete      Delete resource
   get         Get resources
   help        Help about any command
   logs        Get sandbox logs via orchestrator node proxy
   spec        Print resource in YAML spec form
+  uncordon    Mark node schedulable
 
 Flags:
   -c, --config string     path to sbxctl config json (default "/var/lib/sandboxd/sbxctl_config.json")
@@ -259,6 +265,8 @@ The main available commands are as follows:
 - `get`: Used to retrieve a list of resources or inspect detailed information for a specific resource. Resource types may be referenced using either their full names (`nodes`, `external`, `sandboxes`) or shorthand forms (`n`, `e`, `s`). Detailed inspection of a resource can be performed using `/` separators.
 - `create`: Used to create resources from a YAML file. For example: `sbxctl create -f examples/node.yaml`
 - `delete`: Used to delete resources. For example: `sbxctl delete node/sandboxd-node-1`. A specific resource must be explicitly specified.
+- `cordon`: Marks a Node as unschedulable so the scheduler stops placing new sandboxes on it while existing sandboxes keep running. For example: `sbxctl cordon node/sandboxd-node-1`
+- `uncordon`: Marks a Node schedulable again. For example: `sbxctl uncordon node/sandboxd-node-1`
 - `logs`: Used to retrieve sandbox-level logs with each line prefixed by the container name. For example: `sbxctl logs s/sbx-wordpress-demo` returns lines such as `[app] ...` and `[db] ...`. For backward compatibility, `sbxctl logs s/sbx-wordpress-demo app` still retrieves only the `app` container logs. Use `sbxctl logs s/sbx-wordpress-demo --watch` to poll logs and print newly added lines. Internally, this command uses sbxorch's Proxied API to send requests directly to the sbxlet instance running on the target node and retrieve logs.
 
 ## Sandboxd Admin CLI(sbxadm)
@@ -584,20 +592,22 @@ id: sandboxd-node-1
 spec:
     ip: '127.0.0.1'
     port: 8081
+    unschedulable: false
 ```
 
 ```shell
 > sbxctl create -f examples/node.yaml
 > sbxctl get nodes -o wide
 RESOURCE: node
-NAME             STATE  IP         PORT  EXTERNAL       CPU(ALLOC/USED/AVAIL)  MEM(ALLOC/USED/AVAIL)  LAST_ERROR  HEARTBEAT                       UPDATED
-sandboxd-node-1  Ready  127.0.0.1  8081  host1.swua.kr  3600m/0m/3600m         14342MB/0MB/14342MB                2026-05-22T09:17:40.566923735Z  2026-05-21T02:54:11.293035905Z
+NAME             STATE  SCHEDULABLE  IP         PORT  EXTERNAL       CPU(ALLOC/USED/AVAIL)  MEM(ALLOC/USED/AVAIL)  LAST_ERROR  HEARTBEAT                       UPDATED
+sandboxd-node-1  Ready  Yes          127.0.0.1  8081  host1.swua.kr  3600m/0m/3600m         14342MB/0MB/14342MB                2026-05-22T09:17:40.566923735Z  2026-05-21T02:54:11.293035905Z
 ```
 
-Node status can be one of `Ready`, `NotReady`, or `Unknown`, and sandboxes can only be scheduled onto Nodes that are in the `Ready` state.
+Node status can be one of `Ready`, `NotReady`, or `Unknown`, and sandboxes can only be scheduled onto Nodes that are both `Ready` and not marked `spec.unschedulable: true`.
 
 - The `Unknown` state occurs when a node has been newly registered and no Heartbeat has been received yet, or when the Threshold or Grace Period has not elapsed sufficiently to determine its status.
 - The `NotReady` state occurs when a node has not sent a Heartbeat for a certain period of time, or when a Heartbeat was received but the Threshold or Grace Period conditions were not satisfied for the node to be considered `Ready`.
+- Setting `spec.unschedulable: true` is a scheduling policy, not a health status. Existing sandboxes on that node remain untouched, but new sandboxes will no longer be scheduled there until the node is uncordoned.
 
 ## External
 

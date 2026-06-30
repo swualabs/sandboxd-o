@@ -27,6 +27,7 @@ type Node struct {
 	ID            string        `json:"id"`
 	IP            string        `json:"ip"`
 	Port          int           `json:"port"`
+	Unschedulable bool          `json:"unschedulable"`
 	State         NodeState     `json:"state"`
 	Source        string        `json:"source"`
 	LastError     string        `json:"last_error,omitempty"`
@@ -54,9 +55,10 @@ type NodeResources struct {
 }
 
 type RegisterNodeRequest struct {
-	ID   string `json:"id"`
-	IP   string `json:"ip"`
-	Port int    `json:"port"`
+	ID            string `json:"id"`
+	IP            string `json:"ip"`
+	Port          int    `json:"port"`
+	Unschedulable bool   `json:"unschedulable"`
 }
 
 type APIServerConfig struct {
@@ -75,8 +77,17 @@ type CreateNodeObjectRequest struct {
 }
 
 type NodeObjectSpec struct {
-	IP   string `json:"ip" yaml:"ip"`
-	Port int    `json:"port" yaml:"port"`
+	IP            string `json:"ip" yaml:"ip"`
+	Port          int    `json:"port" yaml:"port"`
+	Unschedulable bool   `json:"unschedulable,omitempty" yaml:"unschedulable,omitempty"`
+}
+
+type PatchNodeObjectRequest struct {
+	Spec PatchNodeObjectSpec `json:"spec"`
+}
+
+type PatchNodeObjectSpec struct {
+	Unschedulable *bool `json:"unschedulable"`
 }
 
 type CreateExternalObjectRequest struct {

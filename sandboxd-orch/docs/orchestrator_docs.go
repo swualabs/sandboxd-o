@@ -215,6 +215,63 @@ const docTemplateorchestrator = `{
                         }
                     }
                 }
+            },
+            "patch": {
+                "description": "Updates node scheduling policy fields such as spec.unschedulable.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "orchestrator-node"
+                ],
+                "summary": "Update node scheduling policy",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Node id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Node patch request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/types.PatchNodeObjectRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.NodeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/nodes/{id}/heartbeat": {
@@ -906,6 +963,12 @@ const docTemplateorchestrator = `{
                 "resource": {
                     "$ref": "#/definitions/model.ResourceSpec"
                 },
+                "volumeMounts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.VolumeMount"
+                    }
+                },
                 "workDir": {
                     "type": "string"
                 }
@@ -934,6 +997,12 @@ const docTemplateorchestrator = `{
                 },
                 "readinessProbe": {
                     "$ref": "#/definitions/model.ReadinessProbeSpec"
+                },
+                "volumes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.VolumeSpec"
+                    }
                 }
             }
         },
@@ -990,6 +1059,31 @@ const docTemplateorchestrator = `{
                     "type": "string"
                 },
                 "memory": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.VolumeMount": {
+            "type": "object",
+            "properties": {
+                "mountPath": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "readOnly": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "model.VolumeSpec": {
+            "type": "object",
+            "properties": {
+                "ephemeralStorage": {
+                    "type": "string"
+                },
+                "name": {
                     "type": "string"
                 }
             }
@@ -1077,6 +1171,9 @@ const docTemplateorchestrator = `{
                 "success_streak": {
                     "type": "integer"
                 },
+                "unschedulable": {
+                    "type": "boolean"
+                },
                 "updated_at": {
                     "type": "string"
                 }
@@ -1090,6 +1187,9 @@ const docTemplateorchestrator = `{
                 },
                 "port": {
                     "type": "integer"
+                },
+                "unschedulable": {
+                    "type": "boolean"
                 }
             }
         },
@@ -1140,6 +1240,22 @@ const docTemplateorchestrator = `{
                 "NodeStateReady",
                 "NodeStateNotReady"
             ]
+        },
+        "types.PatchNodeObjectRequest": {
+            "type": "object",
+            "properties": {
+                "spec": {
+                    "$ref": "#/definitions/types.PatchNodeObjectSpec"
+                }
+            }
+        },
+        "types.PatchNodeObjectSpec": {
+            "type": "object",
+            "properties": {
+                "unschedulable": {
+                    "type": "boolean"
+                }
+            }
         },
         "types.ReadinessProbeSpec": {
             "type": "object",
@@ -1216,6 +1332,12 @@ const docTemplateorchestrator = `{
                 },
                 "resource": {
                     "$ref": "#/definitions/types.SandboxResource"
+                },
+                "volume_mounts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/types.SandboxVolumeMount"
+                    }
                 },
                 "work_dir": {
                     "type": "string"
@@ -1304,6 +1426,12 @@ const docTemplateorchestrator = `{
                 },
                 "ttl_seconds": {
                     "type": "integer"
+                },
+                "volumes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/types.SandboxVolumeSpec"
+                    }
                 }
             }
         },
@@ -1332,6 +1460,31 @@ const docTemplateorchestrator = `{
                     "$ref": "#/definitions/types.SandboxPhase"
                 },
                 "sandboxd_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "types.SandboxVolumeMount": {
+            "type": "object",
+            "properties": {
+                "mount_path": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "read_only": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "types.SandboxVolumeSpec": {
+            "type": "object",
+            "properties": {
+                "ephemeral_storage": {
+                    "type": "string"
+                },
+                "name": {
                     "type": "string"
                 }
             }

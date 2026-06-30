@@ -36,6 +36,7 @@ func NewRouter(svc *service.Service, cfg config.Config, logger *logging.Logger) 
 		api.POST("/nodes", h.CreateNodeObject)
 		api.GET("/nodes", h.ListNodes)
 		api.GET("/nodes/:id", h.GetNode)
+		api.PATCH("/nodes/:id", h.PatchNode)
 		api.DELETE("/nodes/:id", h.DeleteNode)
 
 		api.POST("/externals", h.UpsertExternalObject)

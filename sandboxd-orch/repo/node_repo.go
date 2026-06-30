@@ -19,10 +19,11 @@ var ErrExternalConflict = errors.New("external object conflict")
 
 type NodeRepo interface {
 	Close() error
-	UpsertNode(ctx context.Context, id, ip string, port int, source string) error
+	UpsertNode(ctx context.Context, id, ip string, port int, unschedulable bool, source string) error
 	DeleteNode(ctx context.Context, id string) error
 	GetNode(ctx context.Context, id string) (*types.Node, error)
 	ListNodes(ctx context.Context) ([]types.Node, error)
+	SetNodeUnschedulable(ctx context.Context, id string, unschedulable bool) error
 	UpdateHeartbeat(ctx context.Context, id string, state types.NodeState, successStreak, failureStreak int, lastError string, beatAt *time.Time) error
 	UpdateNodeResources(ctx context.Context, id string, res types.NodeResources) error
 	AdjustNodeResourceUsage(ctx context.Context, id string, cpuMilliDelta, memBytesDelta int64) error
@@ -86,106 +87,15 @@ func (r *SQLiteNodeRepo) Close() error {
 	return r.db.Close()
 }
 
-func migrate(db *sql.DB) error {
-	const qNodes = `
-CREATE TABLE IF NOT EXISTS nodes (
-  name TEXT PRIMARY KEY,
-  ip TEXT NOT NULL,
-  port INTEGER NOT NULL,
-  source TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-`
-	const qStatus = `
-CREATE TABLE IF NOT EXISTS node_status (
-  name TEXT PRIMARY KEY,
-  state TEXT NOT NULL,
-  success_streak INTEGER NOT NULL DEFAULT 0,
-  failure_streak INTEGER NOT NULL DEFAULT 0,
-  last_error TEXT NOT NULL DEFAULT '',
-  last_heartbeat_at TEXT,
-  updated_at TEXT NOT NULL
-);
-`
-	const qResources = `
-CREATE TABLE IF NOT EXISTS node_resources (
-  name TEXT PRIMARY KEY,
-  capacity_cpu_milli INTEGER NOT NULL DEFAULT 0,
-  capacity_memory_bytes INTEGER NOT NULL DEFAULT 0,
-  allocatable_cpu_milli INTEGER NOT NULL DEFAULT 0,
-  allocatable_memory_bytes INTEGER NOT NULL DEFAULT 0,
-  used_cpu_milli INTEGER NOT NULL DEFAULT 0,
-  used_memory_bytes INTEGER NOT NULL DEFAULT 0,
-  available_cpu_milli INTEGER NOT NULL DEFAULT 0,
-  available_memory_bytes INTEGER NOT NULL DEFAULT 0,
-  max_alloc_percent INTEGER NOT NULL DEFAULT 0,
-  external TEXT NOT NULL DEFAULT '(none)',
-  resource_updated_at TEXT,
-  updated_at TEXT NOT NULL
-);
-`
-	const qSandboxes = `
-CREATE TABLE IF NOT EXISTS sandboxes (
-  id TEXT PRIMARY KEY,
-  spec_json TEXT NOT NULL,
-  status_json TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-`
-	const qSandboxPorts = `
-CREATE TABLE IF NOT EXISTS sandbox_ports (
-  sandbox_id TEXT NOT NULL,
-  node_name TEXT NOT NULL,
-  host_port INTEGER NOT NULL,
-  container_port INTEGER NOT NULL,
-  protocol TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  PRIMARY KEY (node_name, host_port),
-  FOREIGN KEY (sandbox_id) REFERENCES sandboxes(id) ON DELETE CASCADE
-);
-`
-	const qNodeExternals = `
-CREATE TABLE IF NOT EXISTS node_externals (
-  external_id TEXT PRIMARY KEY,
-  node_id TEXT NOT NULL UNIQUE,
-  external TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  FOREIGN KEY (node_id) REFERENCES nodes(name) ON DELETE CASCADE
-);
-`
-	if _, err := db.Exec(qNodes); err != nil {
-		return err
-	}
-	if _, err := db.Exec(qStatus); err != nil {
-		return err
-	}
-	if _, err := db.Exec(qResources); err != nil {
-		return err
-	}
-	if _, err := db.Exec(qSandboxes); err != nil {
-		return err
-	}
-	if _, err := db.Exec(qSandboxPorts); err != nil {
-		return err
-	}
-	if _, err := db.Exec(qNodeExternals); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (r *SQLiteNodeRepo) UpsertNode(ctx context.Context, id, ip string, port int, source string) error {
+func (r *SQLiteNodeRepo) UpsertNode(ctx context.Context, id, ip string, port int, unschedulable bool, source string) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	const qNode = `
-INSERT INTO nodes(name, ip, port, source, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO nodes(name, ip, port, unschedulable, source, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(name) DO UPDATE SET
   ip=excluded.ip,
   port=excluded.port,
+  unschedulable=excluded.unschedulable,
   source=excluded.source,
   updated_at=excluded.updated_at;
 `
@@ -198,7 +108,7 @@ INSERT INTO node_resources(name, updated_at)
 VALUES (?, ?)
 ON CONFLICT(name) DO NOTHING;`
 
-	_, err := r.db.ExecContext(ctx, qNode, id, ip, port, source, now, now)
+	_, err := r.db.ExecContext(ctx, qNode, id, ip, port, boolToInt(unschedulable), source, now, now)
 	if err != nil {
 		return err
 	}
@@ -223,8 +133,13 @@ func (r *SQLiteNodeRepo) DeleteNode(ctx context.Context, id string) error {
 	return err
 }
 
+func (r *SQLiteNodeRepo) SetNodeUnschedulable(ctx context.Context, id string, unschedulable bool) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE nodes SET unschedulable=?, updated_at=? WHERE name=?`, boolToInt(unschedulable), time.Now().UTC().Format(time.RFC3339Nano), id)
+	return err
+}
+
 func (r *SQLiteNodeRepo) GetNode(ctx context.Context, id string) (*types.Node, error) {
-	const q = `SELECT n.name, n.ip, n.port, n.source,
+	const q = `SELECT n.name, n.ip, n.port, n.unschedulable, n.source,
 COALESCE(s.state, 'Unknown'), COALESCE(s.success_streak,0), COALESCE(s.failure_streak,0), COALESCE(s.last_error,''), s.last_heartbeat_at,
 COALESCE(r.capacity_cpu_milli,0), COALESCE(r.capacity_memory_bytes,0), COALESCE(r.allocatable_cpu_milli,0), COALESCE(r.allocatable_memory_bytes,0),
 COALESCE(r.used_cpu_milli,0), COALESCE(r.used_memory_bytes,0), COALESCE(r.available_cpu_milli,0), COALESCE(r.available_memory_bytes,0), COALESCE(r.max_alloc_percent,0), r.resource_updated_at,
@@ -239,7 +154,7 @@ WHERE n.name=?`
 }
 
 func (r *SQLiteNodeRepo) ListNodes(ctx context.Context) ([]types.Node, error) {
-	const q = `SELECT n.name, n.ip, n.port, n.source,
+	const q = `SELECT n.name, n.ip, n.port, n.unschedulable, n.source,
 COALESCE(s.state, 'Unknown'), COALESCE(s.success_streak,0), COALESCE(s.failure_streak,0), COALESCE(s.last_error,''), s.last_heartbeat_at,
 COALESCE(r.capacity_cpu_milli,0), COALESCE(r.capacity_memory_bytes,0), COALESCE(r.allocatable_cpu_milli,0), COALESCE(r.allocatable_memory_bytes,0),
 COALESCE(r.used_cpu_milli,0), COALESCE(r.used_memory_bytes,0), COALESCE(r.available_cpu_milli,0), COALESCE(r.available_memory_bytes,0), COALESCE(r.max_alloc_percent,0), r.resource_updated_at,
@@ -388,11 +303,12 @@ func scanRow(rows *sql.Rows) (types.Node, error) { return scanRowScanner(rows) }
 func scanRowScanner(s scanner) (types.Node, error) {
 	var n types.Node
 	var state string
+	var unschedulable int
 	var created, updated string
 	var beat sql.NullString
 	var resUpdated sql.NullString
 	if err := s.Scan(
-		&n.ID, &n.IP, &n.Port, &n.Source, &state,
+		&n.ID, &n.IP, &n.Port, &unschedulable, &n.Source, &state,
 		&n.SuccessStreak, &n.FailureStreak, &n.LastError, &beat,
 		&n.Resources.CapacityCPUMilli, &n.Resources.CapacityMemoryBytes,
 		&n.Resources.AllocatableCPUMilli, &n.Resources.AllocatableMemory,
@@ -404,6 +320,7 @@ func scanRowScanner(s scanner) (types.Node, error) {
 	); err != nil {
 		return n, err
 	}
+	n.Unschedulable = unschedulable != 0
 	n.State = types.NodeState(state)
 
 	ct, err := time.Parse(time.RFC3339Nano, created)
@@ -437,6 +354,13 @@ func scanRowScanner(s scanner) (types.Node, error) {
 	}
 
 	return n, nil
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 func (r *SQLiteNodeRepo) SetNodeExternal(ctx context.Context, externalID, nodeID, external string) error {
