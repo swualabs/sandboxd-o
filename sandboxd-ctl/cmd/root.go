@@ -84,6 +84,8 @@ func NewRoot() *cobra.Command {
 	cmd.AddCommand(newSpecCommand(opts))
 	cmd.AddCommand(newCreateCommand(opts))
 	cmd.AddCommand(newDeleteCommand(opts))
+	cmd.AddCommand(newCordonCommand(opts))
+	cmd.AddCommand(newUncordonCommand(opts))
 	cmd.AddCommand(newLogsCommand(opts))
 
 	return cmd

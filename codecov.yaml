@@ -41,3 +41,6 @@ ignore:
 
   # sbxadm is a CLI tool, so we don't need to cover it
   - "sandboxd-adm/**"
+
+  # sbxorch migrations are not tested, so we don't need to cover them
+  - "sandboxd-orch/repo/migrations.go"

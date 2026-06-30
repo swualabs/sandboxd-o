@@ -205,8 +205,9 @@ func CreateWorker(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc 
 		_, err = oc.CreateNodeObject(nodeCtx, map[string]any{
 			"id": name,
 			"spec": map[string]any{
-				"ip":   privateIP,
-				"port": letAPIPort,
+				"ip":            privateIP,
+				"port":          letAPIPort,
+				"unschedulable": false,
 			},
 		})
 		cancel()

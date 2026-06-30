@@ -370,6 +370,10 @@ func (s *Service) scheduleOne(ctx context.Context, sbx types.Sandbox) {
 			continue
 		}
 
+		if n.Unschedulable {
+			continue
+		}
+
 		if n.Resources.AvailableCPUMilli < needCPU || n.Resources.AvailableMemory < needMem {
 			continue
 		}
@@ -389,7 +393,7 @@ func (s *Service) scheduleOne(ctx context.Context, sbx types.Sandbox) {
 
 	if len(cands) == 0 {
 		sbx.Status.Phase = types.SandboxPhaseFailed
-		sbx.Status.LastError = "no feasible node for resources/ports"
+		sbx.Status.LastError = "no feasible schedulable node for resources/ports"
 		_ = s.sbxRepo.UpdateSandboxStatus(ctx, sbx.ID, sbx.Status)
 
 		slog.Info("scheduler sandbox failed no candidate", slog.String("sandbox", sbx.ID), slog.Int64("need_cpu_milli", needCPU), slog.Int64("need_memory_bytes", needMem))

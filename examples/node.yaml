@@ -4,3 +4,4 @@ id: sandboxd-node-1
 spec:
   ip: "127.0.0.1"
   port: 8081
+  unschedulable: false

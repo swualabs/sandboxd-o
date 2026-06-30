@@ -29,6 +29,10 @@ func (c *Client) CreateNodeObject(ctx context.Context, req map[string]any) (map[
 	return c.do(ctx, http.MethodPost, "/api/v1/nodes", req)
 }
 
+func (c *Client) PatchNode(ctx context.Context, name string, req map[string]any) (map[string]any, error) {
+	return c.do(ctx, http.MethodPatch, "/api/v1/nodes/"+url.PathEscape(strings.TrimSpace(name)), req)
+}
+
 func (c *Client) CreateExternalObject(ctx context.Context, req map[string]any) (map[string]any, error) {
 	return c.do(ctx, http.MethodPost, "/api/v1/externals", req)
 }
