@@ -73,6 +73,7 @@ func newCreateClusterCommand(opts *Options) *cobra.Command {
 	cmd.Flags().StringVar(&in.OrchPublicEIP, "orch-public-eip", "", "existing Elastic IP ARN or allocation id to associate (requires --orch-public-endpoint); without it, sbxadm allocates and manages its own EIP automatically")
 	cmd.Flags().StringVar(&in.OrchRootVolume, "orch-root-volume-size", "16Gi", "control plane root EBS volume size")
 	cmd.Flags().StringVar(&in.OrchConfigPath, "orch-config", "", "JSON file overriding sbxorch_config.json defaults (only changed keys need to be present)")
+	cmd.Flags().StringVar(&in.SharedSecret, "shared-secret", "", "explicit cluster shared secret (min 8 chars); omitted by default so sbxadm generates a random secret")
 
 	return cmd
 }

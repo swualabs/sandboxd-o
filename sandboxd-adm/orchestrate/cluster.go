@@ -42,6 +42,7 @@ type CreateClusterInput struct {
 	OrchPublicEIP      string // ARN or allocation id; empty means "auto IP, may change on restart"
 	OrchRootVolume     string // e.g. "16Gi"
 	OrchConfigPath     string // optional JSON overrides file
+	SharedSecret       string // optional explicit cluster shared secret; empty means random
 }
 
 func CreateCluster(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc *ssm.Client, st *store.Store, in CreateClusterInput, s *stepper.Stepper) error {
@@ -221,9 +222,13 @@ func CreateCluster(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc
 	}
 	s.Done("ami=%s", amiID)
 
-	sharedSecret, err := randomSecret(32)
+	sharedSecret, userProvidedSecret, err := resolveClusterSharedSecret(in.SharedSecret)
 	if err != nil {
-		return fmt.Errorf("generate shared secret: %w", err)
+		return fmt.Errorf("resolve shared secret: %w", err)
+	}
+
+	if userProvidedSecret {
+		s.Warn("using operator-supplied shared secret for cluster auth; treat this as sensitive and prefer the default random secret unless you have a strong operational reason")
 	}
 
 	configJSON, err := userdata.MergeConfig("sbxorch", in.OrchConfigPath, sharedSecret, nil)
@@ -328,7 +333,13 @@ func CreateCluster(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc
 	if err := st.PutNewCluster(ctx, cluster); err != nil {
 		return fmt.Errorf("persist cluster: %w", err)
 	}
+
 	s.Done("cluster %q persisted", name)
+	if cluster.ControlPlane.PublicEndpoint && strings.TrimSpace(cluster.ControlPlane.PublicIP) != "" {
+		s.Info("control plane public endpoint: http://%s:%d", cluster.ControlPlane.PublicIP, orchAPIPort)
+	}
+
+	s.Info("cluster shared secret: %s", maskSecret(sharedSecret))
 
 	rollback.clear()
 	return nil
@@ -410,4 +421,35 @@ func randomSecret(n int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+func resolveClusterSharedSecret(raw string) (secret string, userProvided bool, err error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		secret, err := randomSecret(32)
+		return secret, false, err
+	}
+
+	if len(trimmed) < 8 {
+		return "", false, fmt.Errorf("explicit shared secret must be at least 8 characters")
+	}
+
+	return trimmed, true, nil
+}
+
+func maskSecret(secret string) string {
+	if secret == "" {
+		return ""
+	}
+
+	runes := []rune(secret)
+	if len(runes) == 1 {
+		return string(runes[0])
+	}
+
+	if len(runes) == 2 {
+		return string(runes[0]) + "*"
+	}
+
+	return string(runes[0]) + strings.Repeat("*", len(runes)-2) + string(runes[len(runes)-1])
 }

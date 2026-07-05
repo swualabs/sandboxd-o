@@ -332,15 +332,21 @@ sbxadm create cluster my-cluster \
   --region ap-northeast-2 \
   --orch-instance t3.xlarge \
   --orch-public-endpoint \
+  --shared-secret 'my-override-secret' \
   --orch-root-volume-size 16Gi
 ```
 
 - `--orch-public-endpoint`: places the control plane in a public subnet with a public IP. Without it, the control plane lands in a private subnet with no public IP.
 - `--orch-public-eip`: attaches an existing Elastic IP by ARN or allocation id (requires `--orch-public-endpoint`). If omitted, `sbxadm` allocates and manages its own Elastic IP, so the address survives instance restarts.
 - `--orch-config`: a JSON file overlaid on top of the `configs/sbxorch_config.json` defaults. Only the keys present in the file are changed; everything else keeps the shipped default.
+- `--shared-secret`: explicitly sets the cluster's shared secret instead of letting `sbxadm` generate one. It must be at least 8 characters. `sbxadm` prints a warning because this is operationally riskier than the default random secret.
 - For a private control plane (no `--orch-public-endpoint`), `sbxadm` checks up front that the chosen private subnet's route table has a `0.0.0.0/0` route to a NAT gateway. If there's no NAT gateway, it fails immediately without creating any AWS resources — both SSM agent registration and downloading the GitHub release artifact require general internet egress (SSM VPC endpoints alone aren't sufficient).
 
 Creation is logged step by step in a terraform/eksctl-like style (security groups, then IAM instance profiles, then the EC2 instance). If anything fails partway through, every AWS resource created up to that point (EC2 instance, security groups, IAM profiles, Elastic IP) is automatically rolled back. Once the instance is running, `sbxadm` polls `/healthz` directly from inside the instance over SSM to confirm `sbxorch.service` actually came up before declaring the cluster created.
+
+After a successful create, `sbxadm` also prints:
+- the public control-plane URL when `--orch-public-endpoint` was used
+- the cluster shared secret in masked form such as `A***Z`, whether it was generated automatically or set explicitly
 
 ### Worker Node Creation
 
@@ -381,7 +387,7 @@ Instances created by `sbxadm` never receive SSH key material. Instead, their IAM
 
 A worker's security group only opens the host port range used by sandbox workloads to the internet (default `10000-32767`, matching `host_port_min`/`host_port_max`), and only allows traffic to the sbxlet API port (8081) from the control plane's security group. The control plane's sbxorch API port (8082) is restricted to the VPC CIDR unless `--orch-public-endpoint` was given.
 
-Communication between orch and let is authenticated with a shared secret generated automatically at cluster creation time (see [Authentication](#authentication-shared-secret) above). This value is stored in DynamoDB and injected into both components' config files automatically, so there's nothing to manage by hand.
+Communication between orch and let is authenticated with a shared secret generated automatically at cluster creation time by default (see [Authentication](#authentication-shared-secret) above). If needed, `sbxadm create cluster --shared-secret ...` can set it explicitly instead, but this is warned as a higher-risk operational mode. In both cases the value is stored in DynamoDB and injected into both components' config files automatically.
 
 ### Cluster/Worker Info and Refreshing the sbxctl Config
 
