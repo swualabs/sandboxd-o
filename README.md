@@ -61,6 +61,7 @@
     - [Compare Low vs High Resource Configurations](#compare-low-vs-high-resource-configurations)
     - [Sweep](#sweep)
     - [Discussion](#discussion)
+    - [Production-Scale CTF Load Test](#production-scale-ctf-load-test)
 - [Appendix B. Infrastructure Cost Comparison (vs K8s)](#appendix-b-infrastructure-cost-comparison-vs-k8s)
 - [Appendix C. Reference](#appendix-c-reference)
 - [Appendix D. API Documentation](#appendix-d-api-documentation)
@@ -176,7 +177,7 @@ SQLite was chosen because it is a lightweight file-based database, and distribut
 By default, the database is created at `/var/lib/sandboxd/orchestrator.db` and acts as the Source of Truth for managing sandbox resources as well as resources such as Node and External.
 
 > [!NOTE]
-> 
+>
 > SQLite schema changes are applied through a centralized migration list in `sandboxd-orch/repo/migrations.go`. New schema changes should be added there so upgrades remain explicit and testable.
 
 > [!NOTE]
@@ -345,6 +346,7 @@ sbxadm create cluster my-cluster \
 Creation is logged step by step in a terraform/eksctl-like style (security groups, then IAM instance profiles, then the EC2 instance). If anything fails partway through, every AWS resource created up to that point (EC2 instance, security groups, IAM profiles, Elastic IP) is automatically rolled back. Once the instance is running, `sbxadm` polls `/healthz` directly from inside the instance over SSM to confirm `sbxorch.service` actually came up before declaring the cluster created.
 
 After a successful create, `sbxadm` also prints:
+
 - the public control-plane URL when `--orch-public-endpoint` was used
 - the cluster shared secret in masked form such as `A***Z`, whether it was generated automatically or set explicitly
 
@@ -1333,6 +1335,89 @@ The following shows provisioning time metrics for resource configurations rangin
 > The results above assume a **Warm Cache** state for container images. Under **Cold Cache** conditions, significantly higher latency may occur during the image pull stage.
 >
 > In addition, actual provisioning time may vary depending on runtime behavior, networking configuration, and readiness probe settings. Therefore, these results should be treated only as reference measurements for the specific environment and specifications tested.
+
+## Production-Scale CTF Load Test
+
+This section presents the results of performance validation conducted using Sandboxd-O in a production-like environment on the [SMCTF](https://github.com/nullforu/smctf) CTF platform.
+
+The test was performed under the following assumptions, which are nearly identical to the scale used during the actual operation of [SCA CTF 2026](https://dreamhack.io/forum/community/promotion/posts/2039-2026-sca-ctf-%EA%B0%9C%EC%B5%9C/).
+
+| Item                        | Value                                                                                                                                        |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| User scale                  | 60 teams, with up to 2 concurrent Sandboxes per team                                                                                         |
+| Total concurrent Sandboxes  | 120                                                                                                                                          |
+| Maximum Sandbox resources   | `1000m CPU`, `1024Mi memory`                                                                                                                 |
+| Maximum required resources  | `120000m=120vCPU`, `122880Mi=120GiB memory`                                                                                                  |
+| Control Plane               | 1x `m7i.4xlarge` (16 vCPU / 64 GiB, $0.8 per hour)                                                                                           |
+| Workers                     | 10x `c7i.4xlarge` (16 vCPU / 32 GiB, $0.7 per hour)                                                                                          |
+| Control Plane configuration | `create_rps=200`, `create_burst=240`, `status_sync_interval=2s`, `status_sync_batch_size=200`, `status_sync_max_parallel=16`                 |
+| Validation method           | Created 120 Sandboxes almost simultaneously, then performed TCP probes against all targets every `15 seconds` for `10 minutes (600 seconds)` |
+
+### Scenario 1. `profile_migration` Image
+
+This image contains a Pwnable challenge used in SCA CTF and is one of the challenges with the highest vCPU resource requirements.
+
+| Item                                       | Value                                                     |
+| ------------------------------------------ | --------------------------------------------------------- |
+| Creation result                            | `120/120 Running`, `0` failures                           |
+| 10-minute TCP soak                         | `4920/4920` successful, `0` failures, `100%` success rate |
+| Average Worker host CPU utilization        | Approximately `0.65%`                                     |
+| Average Control Plane host CPU utilization | Approximately `0.06%`                                     |
+
+| Metric                       |        mean |      median |         p95 |         p99 |         max |
+| ---------------------------- | ----------: | ----------: | ----------: | ----------: | ----------: |
+| `create_http_ms`             |  `1034.610` |  `1085.952` |  `1602.509` |  `1695.229` |  `1695.285` |
+| `time_to_scheduled_ms`       |  `8333.865` |  `8014.179` | `12251.279` | `13576.774` | `13715.233` |
+| `time_to_running_ms`         | `14609.158` | `14548.306` | `18163.670` | `19197.435` | `19227.568` |
+| TCP latency (10-minute soak) |     `9.089` |     `7.451` |    `18.805` |    `26.013` |    `36.365` |
+
+> [!NOTE]
+>
+> `create_http_ms` represents the elapsed time from when the client sends a `POST /api/v1/sandboxes` request until sbxorch returns the HTTP response.
+
+Rather than testing an application that continuously consumes a large amount of CPU, this scenario primarily validates whether the system can handle concurrent creation requests, reliably bring all 120 Sandboxes into the Running state, and continuously maintain external TCP connectivity.
+
+The following graphs visualize the results of Scenario 1.
+
+![Scenario 1 CDF](./assets/ctf-loadtest-s1-latency-cdf.png)
+
+![Scenario 1 Running Count](./assets/ctf-loadtest-s1-running-sandboxes.png)
+
+![Scenario 1 Control Plane](./assets/ctf-loadtest-s1-control-plane-cpu-mem.png)
+
+![Scenario 1 TCP Soak](./assets/ctf-loadtest-s1-tcp-soak-latency.png)
+
+### Scenario 2. `stressbox` CPU/Memory Isolation Validation
+
+| Item                                       | Value                                                                                                                         |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| Application behavior                       | Each Sandbox listens on `31337/tcp` while continuously generating load with `STRESS_CPU_BURNERS=1` and `STRESS_ALLOC_MIB=900` |
+| Creation result                            | `120/120 Running`, `0` failures                                                                                               |
+| 10-minute TCP soak                         | `4920/4920` successful, `0` failures, `100%` success rate                                                                     |
+| Per-worker placement result                | Every worker hosted `12 Sandboxes`, using `12000m CPU` and `12288MB memory`                                                   |
+| Worker CPU utilization                     | Host mean-of-means of approximately `74.53%`, with per-host p99 peaks generally around `~76%`                                 |
+| Worker memory utilization                  | Per-host p95 values generally ranged from `38.7%` to `39.0%` during steady state                                              |
+| Average Control Plane host CPU utilization | Approximately `0.11%`                                                                                                         |
+
+| Metric                       |        mean |      median |         p95 |         p99 |         max |
+| ---------------------------- | ----------: | ----------: | ----------: | ----------: | ----------: |
+| `create_http_ms`             |  `1101.485` |  `1205.113` |  `1800.048` |  `1878.291` |  `1927.224` |
+| `time_to_scheduled_ms`       |  `7940.786` |  `8480.855` | `12178.036` | `12495.589` | `12754.145` |
+| `time_to_running_ms`         | `10967.894` | `10089.630` | `15539.765` | `15710.335` | `15715.322` |
+| TCP latency (10-minute soak) |     `9.975` |     `8.083` |    `21.697` |    `30.637` |    `42.620` |
+
+This scenario validates whether workloads are evenly distributed across nodes and whether external TCP connectivity remains stable for 10 minutes when running 120 applications that continuously consume CPU and memory resources.
+
+The following graphs visualize the results of Scenario 2.
+
+![Scenario 2 CDF](./assets/ctf-loadtest-s2-latency-cdf.png)
+![Scenario 2 Worker CPU](./assets/ctf-loadtest-s2-worker-cpu-heatmap.png)
+![Scenario 2 Worker Memory](./assets/ctf-loadtest-s2-worker-mem-heatmap.png)
+![Scenario 2 TCP Soak](./assets/ctf-loadtest-s2-tcp-soak-latency.png)
+
+### Conclusion
+
+Overall, both scenarios completed successfully without any Sandbox failures or loss of TCP connectivity. Even under the maximum expected production load of 120 concurrent Sandboxes, Sandboxd-O maintained stable scheduling behavior, balanced worker utilization, and consistent provisioning latency, demonstrating that the platform is suitable for production-scale CTF deployments.
 
 # Appendix B. Infrastructure Cost Comparison (vs K8s)
 
