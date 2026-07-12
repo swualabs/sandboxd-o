@@ -106,19 +106,7 @@ func CreateWorker(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc 
 	var eipManaged bool
 	var preAssociatedIP string
 	if eipAllocID == "" {
-		s.Step("allocating Elastic IP for worker %q", name)
-		allocID, ip, err := awsx.AllocateEIP(ctx, ec2c, fmt.Sprintf("sbxcluster-%s-worker-%s-eip", in.ClusterName, name))
-		if err != nil {
-			return fmt.Errorf("allocate worker eip: %w", err)
-		}
-
-		eipAllocID = allocID
-		eipManaged = true
-		preAssociatedIP = ip
-		rollback.add(fmt.Sprintf("release EIP %s", eipAllocID), func(ctx context.Context) error {
-			return awsx.ReleaseEIP(ctx, ec2c, eipAllocID)
-		})
-		s.Done("allocated eip %s (%s)", eipAllocID, ip)
+		s.Info("no --public-eip given; worker will use the subnet's auto-assigned public IPv4 instead of a managed Elastic IP")
 	}
 
 	external := strings.TrimSpace(in.External)
@@ -149,7 +137,7 @@ func CreateWorker(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc 
 		SubnetID:           subnetID,
 		SecurityGroupIDs:   []string{cluster.WorkerSecurityGroup},
 		RootVolumeSizeGB:   rootGiB,
-		AssignPublicIP:     false, // always EIP-backed now, see allocation above
+		AssignPublicIP:     eipAllocID == "",
 		UserData:           script,
 		IAMInstanceProfile: cluster.WorkerInstanceProfile,
 		Tags:               map[string]string{"sbxadm/cluster": in.ClusterName, "sbxadm/role": "worker", "sbxadm/worker": name},
@@ -163,26 +151,33 @@ func CreateWorker(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc 
 	})
 	s.Done("instance %s running (private_ip=%s)", instanceID, privateIP)
 
-	s.Step("associating Elastic IP %s", eipAllocID)
-	publicIP, err = awsx.AssociateEIPByAllocationID(ctx, ec2c, instanceID, eipAllocID)
-	if err != nil {
-		return err
-	}
+	if eipAllocID != "" {
+		s.Step("associating Elastic IP %s", eipAllocID)
+		publicIP, err = awsx.AssociateEIPByAllocationID(ctx, ec2c, instanceID, eipAllocID)
+		if err != nil {
+			return err
+		}
 
-	if !eipManaged {
-		rollback.add(fmt.Sprintf("disassociate EIP %s", eipAllocID), func(ctx context.Context) error {
-			return awsx.DisassociateEIP(ctx, ec2c, eipAllocID)
-		})
-	}
+		if !eipManaged {
+			rollback.add(fmt.Sprintf("disassociate EIP %s", eipAllocID), func(ctx context.Context) error {
+				return awsx.DisassociateEIP(ctx, ec2c, eipAllocID)
+			})
+		}
 
-	if publicIP == "" {
-		publicIP = preAssociatedIP
+		if publicIP == "" {
+			publicIP = preAssociatedIP
+		}
+
+		s.Done("eip associated public_ip=%s", publicIP)
+	} else if publicIP != "" {
+		s.Done("auto-assigned public_ip=%s", publicIP)
+	} else {
+		s.Warn("worker %q launched without a public IP; External registration may fail unless --external was provided", name)
 	}
-	s.Done("eip associated public_ip=%s", publicIP)
 
 	if external == "" {
 		external = publicIP
-		s.Info("no --external given; registering External as the worker's own EIP (%s)", external)
+		s.Info("no --external given; registering External as the worker's own public IP (%s)", external)
 	}
 
 	s.Step("waiting for SSM agent to come online on %s", instanceID)
