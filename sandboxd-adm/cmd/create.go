@@ -64,7 +64,7 @@ func newCreateClusterCommand(opts *Options) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&in.Version, "version", "", "sandboxd-o release version to install, e.g. 0.3.0 (required)")
+	cmd.Flags().StringVar(&in.Version, "version", "", "sandboxd-o release version to install, e.g. 0.5.0 (required)")
 	cmd.Flags().StringVar(&in.VPCID, "vpc-id", "", "VPC id (required)")
 	cmd.Flags().StringVar(&publicSubnets, "public-subnet", "", "comma-separated public subnet ids (at least 1, required)")
 	cmd.Flags().StringVar(&privateSubnets, "private-subnet", "", "comma-separated private subnet ids (at least 1, required)")
@@ -121,7 +121,7 @@ func newCreateWorkerCommand(opts *Options) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&in.Version, "version", "", "sandboxd-o release version to install, e.g. 0.3.0 (required)")
+	cmd.Flags().StringVar(&in.Version, "version", "", "sandboxd-o release version to install, e.g. 0.5.0 (required)")
 	cmd.Flags().StringVar(&in.ClusterName, "cluster", "", "cluster name (required)")
 	cmd.Flags().StringVar(&in.InstanceType, "instance", "", "worker EC2 instance type (required)")
 	cmd.Flags().StringVar(&in.RuntimeBinary, "runtime-binary", "runsc", "worker container runtime handler to use: runsc (default) or runc")

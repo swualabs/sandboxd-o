@@ -39,7 +39,7 @@ const releaseAPITemplate = "https://api.github.com/repos/swualabs/sandboxd-o/rel
 
 type Params struct {
 	Component  string // "sbxorch" or "sbxlet"
-	Version    string // e.g. "0.3.0"
+	Version    string // e.g. "0.5.0"
 	ConfigJSON string // final merged JSON config to install at /var/lib/sandboxd/<component>_config.json
 }
 

@@ -330,7 +330,7 @@ Exactly one control plane (sbxorch) can exist per cluster. The VPC id and the pu
 
 ```shell
 sbxadm create cluster my-cluster \
-  --version 0.3.0 \
+  --version 0.5.0 \
   --vpc-id vpc-0123456789abcdef0 \
   --public-subnet subnet-0aaa111,subnet-0bbb222 \
   --private-subnet subnet-0ccc333,subnet-0ddd444 \
@@ -359,7 +359,7 @@ After a successful create, `sbxadm` also prints:
 ```shell
 sbxadm create worker my-worker-1 \
   --cluster my-cluster \
-  --version 0.3.0 \
+  --version 0.5.0 \
   --instance t3.xlarge \
   --runtime-binary runsc \
   --root-volume-size 64Gi \
@@ -377,7 +377,7 @@ Once the instance finishes bootstrapping (including installing gVisor/containerd
 ```shell
 sbxadm create worker my-runc-worker \
   --cluster my-cluster \
-  --version 0.4.1 \
+  --version 0.5.0 \
   --instance c7i.xlarge \
   --runtime-binary runc \
   --root-volume-size 64Gi
@@ -390,7 +390,7 @@ Supported values are `runsc` and `runc`. If the flag is omitted, `runsc` is used
 ```shell
 sbxadm create worker my-worker-2 \
   --cluster my-cluster \
-  --version 0.3.0 \
+  --version 0.5.0 \
   --instance t3.xlarge \
   --ecr-repos "my-repo-1,ctf-*"
 ```
@@ -540,7 +540,7 @@ echo "$ORCH_EIP_ALLOC"
 
 ```shell
 sbxadm create cluster my-cluster \
-  --version 0.3.0 \
+  --version 0.5.0 \
   --vpc-id "$VPC_ID" \
   --public-subnet "$PUB_SUBNET" \
   --private-subnet "$PRIV_SUBNET" \
@@ -558,7 +558,7 @@ Drop `--orch-public-eip "$ORCH_EIP_ALLOC"` entirely to let `sbxadm` allocate and
 ```shell
 sbxadm create worker my-worker-1 \
   --cluster my-cluster \
-  --version 0.3.0 \
+  --version 0.5.0 \
   --instance t3.xlarge \
   --root-volume-size 64Gi \
   --ecr-repos "my-repo-1,ctf-*" \
@@ -1469,6 +1469,7 @@ The following shows provisioning time metrics for resource configurations rangin
 This section presents the results of performance validation conducted using Sandboxd-O in a production-like environment on the [SMCTF](https://github.com/nullforu/smctf) CTF platform.
 
 The test was performed under the following assumptions, which are nearly identical to the scale used during the actual operation of [SCA CTF 2026](https://dreamhack.io/forum/community/promotion/posts/2039-2026-sca-ctf-%EA%B0%9C%EC%B5%9C/).
+(It later demonstrated exceptional stability during the actual medium-to-large-scale operation of SCA CTF 2026.)
 
 | Item                        | Value                                                                                                                                        |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |

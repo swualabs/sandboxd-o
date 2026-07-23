@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-DEFAULT_ARTICLES_ZIP_URL="https://github.com/swualabs/sandboxd-o/releases/download/v0.3.0/articles.zip"
+DEFAULT_ARTICLES_ZIP_URL="https://github.com/swualabs/sandboxd-o/releases/download/v0.5.0/articles.zip"
 
 ARTICLES_ZIP_URL="${ARTICLES_ZIP_URL:-$DEFAULT_ARTICLES_ZIP_URL}"
 APP_ROOT="${APP_ROOT:-/opt/sandboxd-o}"
@@ -63,7 +63,7 @@ Examples:
   sudo bash sbx-node-bootstrap.sh sbxlet
   sudo bash sbx-node-bootstrap.sh sbxorch
   sudo START_SERVICE=false bash sbx-node-bootstrap.sh sbxlet
-  sudo ARTICLES_ZIP_URL=https://github.com/swualabs/sandboxd-o/releases/download/v0.3.0/articles.zip bash sbx-node-bootstrap.sh sbxlet
+  sudo ARTICLES_ZIP_URL=https://github.com/swualabs/sandboxd-o/releases/download/v0.5.0/articles.zip bash sbx-node-bootstrap.sh sbxlet
 EOF
 }
 
