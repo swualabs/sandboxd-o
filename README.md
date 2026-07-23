@@ -36,6 +36,7 @@
         - [Private ECR Pull Allowlist](#private-ecr-pull-allowlist)
         - [Security Model](#security-model)
         - [Cluster/Worker Info and Refreshing the sbxctl Config](#clusterworker-info-and-refreshing-the-sbxctl-config)
+        - [Cluster/Worker Resizing](#clusterworker-resizing)
         - [Cluster/Worker Deletion](#clusterworker-deletion)
         - [Example Creation of a Cluster and Worker Node](#example-creation-of-a-cluster-and-worker-node)
 - [Resource Model/Objects](#resource-modelobjects)
@@ -46,6 +47,7 @@
         - [volumes](#volumes)
         - [volume_mounts](#volume_mounts)
         - [containers](#containers)
+            - [Container Security and Runtime Options](#container-security-and-runtime-options)
         - [Readiness Probe](#readiness-probe)
 - [Sandbox/Container State](#sandboxcontainer-state)
 - [Installation, Build and Usage](#installation-build-and-usage)
@@ -290,6 +292,7 @@ Available Commands:
   delete               Delete a worker node or an entire cluster
   help                 Help about any command
   info                 Show detailed cluster/worker information
+  resize               Resize a cluster control plane or worker EC2 instance
   update-sbxctl-config Refresh /var/lib/sandboxd/sbxctl_config.json on a cluster's public control plane
 
 Flags:
@@ -424,6 +427,28 @@ sbxadm update-sbxctl-config my-cluster
 ```
 
 It returns an error for clusters whose control plane isn't publicly accessible.
+
+### Cluster/Worker Resizing
+
+`sbxadm resize` changes the EC2 instance type of an existing control plane or worker node.
+
+```shell
+sbxadm resize control-plane my-cluster \
+  --instance m7i.2xlarge
+
+sbxadm resize worker my-worker-1 \
+  --cluster my-cluster \
+  --instance c7i.4xlarge
+```
+
+> [!WARNING]
+> Resizing is implemented with the standard EC2 stop -> modify instance type -> start flow. This means downtime is expected.
+>
+> Resizing the control plane makes the sbxorch API unavailable while the instance is stopped and restarted. Resizing a worker interrupts sbxlet on that node, and sandboxes running on that worker may experience downtime or may need to be recreated depending on runtime behavior.
+
+For this reason, sbxadm prints an explicit warning before resizing, but it does not ask for interactive confirmation.
+
+After the instance starts again, sbxadm waits for the SSM agent and the relevant local health check (`sbxorch` on port `8082`, or `sbxlet` on port `8081`) before persisting the new instance type and refreshed IP metadata back to DynamoDB.
 
 ### Cluster/Worker Deletion
 
