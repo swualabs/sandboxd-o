@@ -2,6 +2,11 @@ package model
 
 import "time"
 
+type TmpfsMount struct {
+	MountPath string `json:"mountPath"`
+	Options   string `json:"options,omitempty"`
+}
+
 type VolumeSpec struct {
 	Name             string `json:"name"`
 	EphemeralStorage string `json:"ephemeralStorage"`
@@ -52,6 +57,11 @@ type ContainerState struct {
 	Image        string        `json:"image"`
 	Args         []string      `json:"args,omitempty"`
 	Env          []string      `json:"env,omitempty"`
+	CapAdd       []string      `json:"capAdd,omitempty"`
+	CapDrop      []string      `json:"capDrop,omitempty"`
+	SecurityOpt  []string      `json:"securityOpt,omitempty"`
+	ReadOnly     bool          `json:"readOnly,omitempty"`
+	Tmpfs        []TmpfsMount  `json:"tmpfs,omitempty"`
 	VolumeMounts []VolumeMount `json:"volumeMounts,omitempty"`
 	Resource     ResourceSpec  `json:"resource"`
 	TaskPID      uint32        `json:"taskPID"`
@@ -85,6 +95,11 @@ type CreateContainerRequest struct {
 	Args         []string      `json:"args"`
 	Env          []string      `json:"env"`
 	WorkDir      string        `json:"workDir"`
+	CapAdd       []string      `json:"capAdd,omitempty"`
+	CapDrop      []string      `json:"capDrop,omitempty"`
+	SecurityOpt  []string      `json:"securityOpt,omitempty"`
+	ReadOnly     bool          `json:"readOnly,omitempty"`
+	Tmpfs        []TmpfsMount  `json:"tmpfs,omitempty"`
 	VolumeMounts []VolumeMount `json:"volumeMounts,omitempty"`
 	Resource     ResourceSpec  `json:"resource"`
 }

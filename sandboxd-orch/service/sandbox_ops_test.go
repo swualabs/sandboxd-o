@@ -270,6 +270,79 @@ func TestCreateSandboxOnNode_ForwardsSharedVolumes(t *testing.T) {
 	}
 }
 
+func TestCreateSandboxOnNode_ForwardsContainerRuntimeOptions(t *testing.T) {
+	var captured model.CreateSandboxRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/sandboxes" {
+			defer r.Body.Close()
+			if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
+			_ = json.NewEncoder(w).Encode(map[string]any{"sandbox": map[string]any{"id": "ok"}})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	s := newServiceWithNode(t, server)
+	defer s.Close()
+
+	_, err := s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
+		ID: "sbx-runtime-opts",
+		Spec: types.SandboxSpec{
+			Containers: []types.SandboxContainerSpec{{
+				Name:        "app",
+				Image:       "ubuntu:24.04",
+				CapAdd:      []string{"SYS_PTRACE"},
+				CapDrop:     []string{"ALL"},
+				SecurityOpt: []string{"no-new-privileges:false", "seccomp=unconfined"},
+				ReadOnly:    true,
+				Tmpfs: []types.SandboxTmpfsMount{{
+					MountPath: "/run",
+					Options:   "rw,nosuid,nodev,noexec,mode=0755,size=64m",
+				}},
+				Resource: types.SandboxResource{
+					CPU:    "100m",
+					Memory: "64Mi",
+				},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.runSchedulerOnce(context.Background())
+
+	if len(captured.Containers) != 1 {
+		t.Fatalf("captured containers=%d", len(captured.Containers))
+	}
+
+	got := captured.Containers[0]
+	if !got.ReadOnly {
+		t.Fatal("expected readOnly to be forwarded")
+	}
+
+	if len(got.CapAdd) != 1 || got.CapAdd[0] != "SYS_PTRACE" {
+		t.Fatalf("capAdd=%v", got.CapAdd)
+	}
+
+	if len(got.CapDrop) != 1 || got.CapDrop[0] != "ALL" {
+		t.Fatalf("capDrop=%v", got.CapDrop)
+	}
+
+	if len(got.SecurityOpt) != 2 {
+		t.Fatalf("securityOpt=%v", got.SecurityOpt)
+	}
+
+	if len(got.Tmpfs) != 1 || got.Tmpfs[0].MountPath != "/run" || got.Tmpfs[0].Options != "rw,nosuid,nodev,noexec,mode=0755,size=64m" {
+		t.Fatalf("tmpfs=%+v", got.Tmpfs)
+	}
+}
+
 func TestCreateSandbox_RejectsInvalidEphemeralStorage(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	defer server.Close()
@@ -486,6 +559,12 @@ func TestCreateSandbox_RejectsInvalidSharedVolumeAndMountInputs(t *testing.T) {
 					Name:      "shared-b",
 					MountPath: "/data",
 				})
+			},
+		},
+		{
+			name: "invalid tmpfs mount path",
+			mutate: func(r *types.CreateSandboxObjectRequest) {
+				r.Spec.Containers[0].Tmpfs = []types.SandboxTmpfsMount{{MountPath: "run"}}
 			},
 		},
 	}

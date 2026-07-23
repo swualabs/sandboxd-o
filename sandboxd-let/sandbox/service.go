@@ -801,6 +801,10 @@ func copySandbox(in *model.Sandbox) *model.Sandbox {
 		cp := v
 		cp.Args = append([]string(nil), v.Args...)
 		cp.Env = append([]string(nil), v.Env...)
+		cp.CapAdd = append([]string(nil), v.CapAdd...)
+		cp.CapDrop = append([]string(nil), v.CapDrop...)
+		cp.SecurityOpt = append([]string(nil), v.SecurityOpt...)
+		cp.Tmpfs = append([]model.TmpfsMount(nil), v.Tmpfs...)
 		cp.VolumeMounts = append([]model.VolumeMount(nil), v.VolumeMounts...)
 		out.Containers[k] = cp
 	}
