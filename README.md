@@ -358,6 +358,7 @@ sbxadm create worker my-worker-1 \
   --cluster my-cluster \
   --version 0.3.0 \
   --instance t3.xlarge \
+  --runtime-binary runsc \
   --root-volume-size 64Gi \
   --external host1.example.com
 ```
@@ -367,6 +368,19 @@ Worker nodes always land in a public subnet, round-robined across the cluster's 
 If you do pass a hostname to `--external` (like `host1.example.com` above) instead of letting it default to the worker's IP, `sbxadm` only registers that value with the orchestrator — it does not create or manage any DNS record. You're responsible for pointing an A record at the worker's actual public IP (from `sbxadm info worker`) at your DNS provider yourself; see the note under [External](#external) below.
 
 Once the instance finishes bootstrapping (including installing gVisor/containerd) and passes the `sbxlet.service` health check, `sbxadm` automatically registers a Node object (and an External object, if applicable) with the sbxorch API. Deleting a worker tears down those Node/External objects along with terminating the EC2 instance.
+
+`--runtime-binary` selects the default containerd runtime handler used by the worker node. The default remains `runsc`. If a workload is known to have gVisor compatibility issues, you can create a regular runc-based worker with `--runtime-binary runc`.
+
+```shell
+sbxadm create worker my-runc-worker \
+  --cluster my-cluster \
+  --version 0.4.1 \
+  --instance c7i.xlarge \
+  --runtime-binary runc \
+  --root-volume-size 64Gi
+```
+
+Supported values are `runsc` and `runc`. If the flag is omitted, `runsc` is used.
 
 ### Private ECR Pull Allowlist
 
@@ -770,7 +784,7 @@ Sandbox fundamentally follows and is built upon the PodSandbox model, and theref
 
 The `containers` field represents the list of Application Containers included in this sandbox.
 
-Each container is composed of `name`, `image`, `args`, `env`, `work_dir`, `volume_mounts`, and `resource`.
+Each container is composed of `name`, `image`, `args`, `env`, `work_dir`, `volume_mounts`, security/runtime options, and `resource`.
 
 The following is an example container specification capable of running a sample application.
 
@@ -819,6 +833,94 @@ The following is an example container specification capable of running a sample 
     Resource enforcement is implemented using cgroups, and gVisor is custom patched, built, and used for proper enforcement.
 
     For more details, refer to the [Reference](#reference) section below.
+
+#### Container Security and Runtime Options
+
+Each container may define Docker Compose-like security and runtime options. These options are validated by sbxorch, forwarded to sbxlet, and then translated into CRI `LinuxContainerSecurityContext` and mount settings.
+
+Supported fields:
+
+- `cap_add`: Linux capabilities to add to the container, for example `SYS_PTRACE`.
+- `cap_drop`: Linux capabilities to drop from the container, for example `ALL`.
+- `security_opt`: Container security profile options. `no-new-privileges`, `seccomp`, and `apparmor` are supported.
+- `read_only`: Runs the container root filesystem as read-only when set to `true`.
+- `tmpfs`: Adds custom tmpfs mounts at specific paths inside the container.
+
+Supported `security_opt` values:
+
+- `no-new-privileges:true|false`
+- `seccomp=runtime/default`
+- `seccomp=unconfined`
+- `seccomp=localhost/<absolute-path>`
+- `apparmor=runtime/default`
+- `apparmor=unconfined`
+- `apparmor=localhost/<profile>`
+
+Supported `tmpfs.options` values:
+
+- `ro`, `rw`
+- `nosuid`, `suid`
+- `nodev`, `dev`
+- `noexec`, `exec`
+- `mode=<octal>`
+- `size=<bytes|k/m/g|Ki/Mi/Gi>`
+
+> [!WARNING]
+> These options intentionally expose low-level container security controls. In normal operation, directly overriding them is not recommended unless the workload has a clear compatibility requirement and the resulting security trade-off has been reviewed.
+>
+> In particular, loosening options such as `cap_add`, `security_opt: ["seccomp=unconfined"]`, `security_opt: ["no-new-privileges:false"]`, or disabling read-only rootfs can materially weaken isolation.
+
+> [!NOTE]
+> The options above were verified on `runc` workers. Some options may behave differently or may not work as expected on `runsc`/gVisor workers because gVisor virtualizes syscall handling and filesystem behavior rather than directly exposing the same kernel/runtime semantics as runc.
+
+Example:
+
+```yaml
+apiVersion: sandboxd.o/v1
+kind: Sandbox
+id: root_manager_revenge
+spec:
+    egress: false
+    ttl_seconds: 3600
+    ports:
+        - host_port: 0
+          container_port: 31337
+          protocol: tcp
+    readiness_probe:
+        protocol: tcp
+        port: 31337
+        initial_delay_seconds: 10
+        period_seconds: 5
+        timeout_seconds: 1
+        success_threshold: 1
+        failure_threshold: 30
+    containers:
+        - name: app
+          image: ghcr.io/sandboxd-o/example:latest
+          args: []
+          env: []
+          work_dir: ''
+          cap_drop:
+              - ALL
+          cap_add:
+              - CHOWN
+              - SETGID
+              - SETUID
+              - SYS_PTRACE
+          security_opt:
+              - no-new-privileges:true
+          read_only: true
+          tmpfs:
+              - mount_path: /run
+                options: rw,nosuid,nodev,noexec,mode=0755
+              - mount_path: /tmp
+                options: rw,nosuid,nodev,exec,mode=1777
+          resource:
+              cpu: 1000m
+              memory: 1024Mi
+```
+
+When `read_only: true` is used, any path that the application must write to at runtime should be explicitly provided as a writable `tmpfs` mount. For example, services that need `/run` or `/tmp` should declare writable tmpfs mounts as shown above.
 
 > [!NOTE]
 > However, in the case of `/dev/shm`, it appears that `runsc` internally mounts a separate `tmpfs`.
