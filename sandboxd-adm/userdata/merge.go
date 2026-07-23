@@ -7,9 +7,10 @@ import (
 	"os"
 )
 
-// Layering order: shipped default -> dynamicDefaults -> overridePath ->
+// Layering order:
+// shipped default -> dynamicDefaults -> overridePath -> finalOverrides ->
 // sharedSecret (always wins last).
-func MergeConfig(component, overridePath, sharedSecret string, dynamicDefaults map[string]any) (string, error) {
+func MergeConfig(component, overridePath, sharedSecret string, dynamicDefaults, finalOverrides map[string]any) (string, error) {
 	def, ok := defaultConfigs[component]
 	if !ok {
 		return "", fmt.Errorf("no default config for component %q", component)
@@ -33,6 +34,8 @@ func MergeConfig(component, overridePath, sharedSecret string, dynamicDefaults m
 		}
 		maps.Copy(base, override)
 	}
+
+	maps.Copy(base, finalOverrides)
 
 	if sharedSecret != "" {
 		base["shared_secret"] = sharedSecret

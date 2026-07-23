@@ -20,17 +20,18 @@ import (
 const defaultWorkerRootVolumeGiB = 64
 
 type CreateWorkerInput struct {
-	Name         string
-	Version      string
-	ClusterName  string
-	InstanceType string
-	RootVolume   string // e.g. "64Gi"
-	External     string // optional hostname; defaults to the worker's EIP when left empty
-	PublicEIP    string // ARN or allocation id; empty means "auto-allocate a managed EIP"
-	ConfigPath   string // optional JSON overrides file
-	ECRRepos     string // comma-separated ECR repo name patterns to grant pull access to, e.g. "my-repo-1,ctf-*"
-	OrchServer   string // explicit orch base URL override (SBXADM_ORCH_SERVER)
-	OrchTimeout  time.Duration
+	Name          string
+	Version       string
+	ClusterName   string
+	InstanceType  string
+	RuntimeBinary string // "runsc" (default) or "runc"
+	RootVolume    string // e.g. "64Gi"
+	External      string // optional hostname; defaults to the worker's EIP when left empty
+	PublicEIP     string // ARN or allocation id; empty means "auto-allocate a managed EIP"
+	ConfigPath    string // optional JSON overrides file
+	ECRRepos      string // comma-separated ECR repo name patterns to grant pull access to, e.g. "my-repo-1,ctf-*"
+	OrchServer    string // explicit orch base URL override (SBXADM_ORCH_SERVER)
+	OrchTimeout   time.Duration
 }
 
 func CreateWorker(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc *ssm.Client, st *store.Store, accountID string, in CreateWorkerInput, s *stepper.Stepper) error {
@@ -67,6 +68,14 @@ func CreateWorker(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc 
 		if err != nil {
 			return fmt.Errorf("--root-volume-size: %w", err)
 		}
+	}
+
+	runtimeBinary := strings.ToLower(strings.TrimSpace(in.RuntimeBinary))
+	if runtimeBinary == "" {
+		runtimeBinary = "runsc"
+	}
+	if runtimeBinary != "runsc" && runtimeBinary != "runc" {
+		return fmt.Errorf("--runtime-binary: unsupported value %q (expected runsc or runc)", in.RuntimeBinary)
 	}
 
 	prevECRPatterns := cluster.WorkerECRRepoPatterns
@@ -118,7 +127,9 @@ func CreateWorker(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc 
 	}
 	s.Done("ami=%s", amiID)
 
-	configJSON, err := userdata.MergeConfig("sbxlet", in.ConfigPath, cluster.SharedSecret, nil)
+	configJSON, err := userdata.MergeConfig("sbxlet", in.ConfigPath, cluster.SharedSecret, nil, map[string]any{
+		"runtime_binary": runtimeBinary,
+	})
 	if err != nil {
 		return fmt.Errorf("build sbxlet config: %w", err)
 	}

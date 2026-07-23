@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 
 	k8sresource "k8s.io/apimachinery/pkg/api/resource"
@@ -33,6 +35,7 @@ func ValidateSandboxID(id string) error {
 var safeSandboxIDRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 var safeVolumeNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 var safeContainerNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
+var safeCapabilityNameRe = regexp.MustCompile(`^[A-Z0-9_]+$`)
 
 // ValidateContainerName enforces a strict allowlist for container names.
 //
@@ -158,6 +161,52 @@ func (r CreateSandboxRequest) Validate() error {
 
 			seenMountPaths[mountPath] = struct{}{}
 		}
+
+		for _, mount := range c.Tmpfs {
+			mountPath := strings.TrimSpace(mount.MountPath)
+			if mountPath == "" {
+				return fmt.Errorf("container %s: tmpfs mountPath is required", c.Name)
+			}
+
+			if !strings.HasPrefix(mountPath, "/") {
+				return fmt.Errorf("container %s: tmpfs mountPath must be absolute", c.Name)
+			}
+
+			if path.Clean(mountPath) != mountPath {
+				return fmt.Errorf("container %s: tmpfs mountPath must be clean", c.Name)
+			}
+
+			if mountPath == "/" {
+				return fmt.Errorf("container %s: tmpfs mountPath '/' is not allowed", c.Name)
+			}
+
+			if _, ok := seenMountPaths[mountPath]; ok {
+				return fmt.Errorf("container %s: duplicate mountPath %s", c.Name, mountPath)
+			}
+
+			seenMountPaths[mountPath] = struct{}{}
+			if err := validateTmpfsOptions(mount.Options); err != nil {
+				return fmt.Errorf("container %s: tmpfs %s: %w", c.Name, mountPath, err)
+			}
+		}
+
+		for _, capName := range c.CapAdd {
+			if err := validateCapabilityName(capName); err != nil {
+				return fmt.Errorf("container %s: invalid capAdd entry: %w", c.Name, err)
+			}
+		}
+
+		for _, capName := range c.CapDrop {
+			if err := validateCapabilityName(capName); err != nil {
+				return fmt.Errorf("container %s: invalid capDrop entry: %w", c.Name, err)
+			}
+		}
+
+		for _, raw := range c.SecurityOpt {
+			if err := validateSecurityOpt(raw); err != nil {
+				return fmt.Errorf("container %s: %w", c.Name, err)
+			}
+		}
 	}
 
 	seenHostPorts := map[int]struct{}{}
@@ -234,4 +283,154 @@ func (r CreateSandboxRequest) Validate() error {
 	}
 
 	return nil
+}
+
+func validateCapabilityName(name string) error {
+	v := strings.TrimSpace(name)
+	if v == "" {
+		return fmt.Errorf("capability is empty")
+	}
+	if !safeCapabilityNameRe.MatchString(v) {
+		return fmt.Errorf("unsupported capability %q", name)
+	}
+	return nil
+}
+
+func validateSecurityOpt(raw string) error {
+	v := strings.TrimSpace(raw)
+	if v == "" {
+		return fmt.Errorf("securityOpt entry is empty")
+	}
+
+	key, value, ok := splitOption(v)
+	if !ok {
+		return fmt.Errorf("securityOpt %q must use key=value or key:value", raw)
+	}
+
+	switch strings.ToLower(key) {
+	case "no-new-privileges":
+		if _, err := strconv.ParseBool(strings.TrimSpace(value)); err != nil {
+			return fmt.Errorf("securityOpt %q has invalid boolean", raw)
+		}
+	case "seccomp", "apparmor":
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("securityOpt %q requires a profile value", raw)
+		}
+	default:
+		return fmt.Errorf("unsupported securityOpt %q", raw)
+	}
+
+	return nil
+}
+
+func validateTmpfsOptions(raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+
+	for _, item := range strings.Split(raw, ",") {
+		part := strings.TrimSpace(item)
+		if part == "" {
+			return fmt.Errorf("empty option")
+		}
+
+		switch part {
+		case "ro", "rw", "nosuid", "suid", "nodev", "dev", "noexec", "exec":
+			continue
+		}
+
+		key, value, ok := splitOption(part)
+		if !ok {
+			return fmt.Errorf("unsupported option %q", part)
+		}
+
+		switch strings.ToLower(key) {
+		case "mode":
+			if value == "" {
+				return fmt.Errorf("mode requires a value")
+			}
+			if _, err := strconv.ParseUint(value, 8, 32); err != nil {
+				return fmt.Errorf("invalid mode %q", value)
+			}
+		case "size":
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("size requires a value")
+			}
+			if _, err := parseByteSize(strings.TrimSpace(value)); err != nil {
+				return fmt.Errorf("invalid size %q", value)
+			}
+		default:
+			return fmt.Errorf("unsupported option %q", part)
+		}
+	}
+
+	return nil
+}
+
+func splitOption(raw string) (string, string, bool) {
+	if key, value, ok := strings.Cut(raw, "="); ok {
+		return strings.TrimSpace(key), strings.TrimSpace(value), true
+	}
+	if key, value, ok := strings.Cut(raw, ":"); ok {
+		return strings.TrimSpace(key), strings.TrimSpace(value), true
+	}
+	return "", "", false
+}
+
+func parseByteSize(raw string) (int64, error) {
+	v := strings.TrimSpace(raw)
+	if v == "" {
+		return 0, fmt.Errorf("size is required")
+	}
+
+	type suffixDef struct {
+		suffix string
+		scale  int64
+	}
+	suffixes := []suffixDef{
+		{"kib", 1024},
+		{"mib", 1024 * 1024},
+		{"gib", 1024 * 1024 * 1024},
+		{"tib", 1024 * 1024 * 1024 * 1024},
+		{"ki", 1024},
+		{"mi", 1024 * 1024},
+		{"gi", 1024 * 1024 * 1024},
+		{"ti", 1024 * 1024 * 1024 * 1024},
+		{"kb", 1000},
+		{"mb", 1000 * 1000},
+		{"gb", 1000 * 1000 * 1000},
+		{"tb", 1000 * 1000 * 1000 * 1000},
+		{"k", 1000},
+		{"m", 1000 * 1000},
+		{"g", 1000 * 1000 * 1000},
+		{"t", 1000 * 1000 * 1000 * 1000},
+		{"b", 1},
+	}
+	sort.Slice(suffixes, func(i, j int) bool { return len(suffixes[i].suffix) > len(suffixes[j].suffix) })
+
+	lower := strings.ToLower(v)
+	for _, def := range suffixes {
+		if !strings.HasSuffix(lower, def.suffix) {
+			continue
+		}
+		num := strings.TrimSpace(v[:len(v)-len(def.suffix)])
+		if num == "" {
+			return 0, fmt.Errorf("size is required")
+		}
+		n, err := strconv.ParseInt(num, 10, 64)
+		if err != nil || n <= 0 {
+			return 0, fmt.Errorf("invalid size %q", raw)
+		}
+		return n * def.scale, nil
+	}
+
+	if q, err := k8sresource.ParseQuantity(v); err == nil && q.Value() > 0 {
+		return q.Value(), nil
+	}
+
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("invalid size %q", raw)
+	}
+	return n, nil
 }

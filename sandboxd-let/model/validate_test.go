@@ -277,6 +277,26 @@ func TestValidate_SharedVolumesOK(t *testing.T) {
 	}
 }
 
+func TestValidate_ContainerRuntimeOptionsOK(t *testing.T) {
+	r := validReq()
+	r.Containers[0].CapAdd = []string{"SYS_PTRACE"}
+	r.Containers[0].CapDrop = []string{"ALL"}
+	r.Containers[0].ReadOnly = true
+	r.Containers[0].SecurityOpt = []string{
+		"no-new-privileges:false",
+		"seccomp=unconfined",
+		"apparmor=runtime/default",
+	}
+	r.Containers[0].Tmpfs = []TmpfsMount{{
+		MountPath: "/run",
+		Options:   "rw,nosuid,nodev,noexec,mode=0755,size=64m",
+	}}
+
+	if err := r.Validate(); err != nil {
+		t.Fatalf("expected valid runtime options, got err=%v", err)
+	}
+}
+
 func TestValidate_SharedVolumeInvalidCases(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -394,6 +414,38 @@ func TestValidate_SharedVolumeInvalidCases(t *testing.T) {
 					{Name: "shared-a", MountPath: "/data"},
 					{Name: "shared-b", MountPath: "/data"},
 				}
+			},
+		},
+		{
+			name: "invalid capability",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Containers[0].CapAdd = []string{"sys_ptrace"}
+			},
+		},
+		{
+			name: "invalid security opt",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Containers[0].SecurityOpt = []string{"label=disable"}
+			},
+		},
+		{
+			name: "invalid tmpfs path",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Containers[0].Tmpfs = []TmpfsMount{{MountPath: "run"}}
+			},
+		},
+		{
+			name: "invalid tmpfs options",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Containers[0].Tmpfs = []TmpfsMount{{MountPath: "/run", Options: "size=bad"}}
+			},
+		},
+		{
+			name: "tmpfs duplicate mount path with volume mount",
+			mutate: func(r *CreateSandboxRequest) {
+				r.Volumes = []VolumeSpec{{Name: "shared", EphemeralStorage: "64Mi"}}
+				r.Containers[0].VolumeMounts = []VolumeMount{{Name: "shared", MountPath: "/run"}}
+				r.Containers[0].Tmpfs = []TmpfsMount{{MountPath: "/run"}}
 			},
 		},
 	}

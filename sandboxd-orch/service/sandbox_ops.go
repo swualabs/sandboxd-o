@@ -256,6 +256,31 @@ func validateSandboxCreate(req types.CreateSandboxObjectRequest) error {
 
 			seenMountPaths[mountPath] = struct{}{}
 		}
+
+		for _, tm := range c.Tmpfs {
+			mountPath := strings.TrimSpace(tm.MountPath)
+			if mountPath == "" {
+				return fmt.Errorf("%w: container %s tmpfs mount_path is required", ErrInvalidInput, c.Name)
+			}
+
+			if !strings.HasPrefix(mountPath, "/") {
+				return fmt.Errorf("%w: container %s tmpfs mount_path must be absolute", ErrInvalidInput, c.Name)
+			}
+
+			if path.Clean(mountPath) != mountPath {
+				return fmt.Errorf("%w: container %s tmpfs mount_path must be clean", ErrInvalidInput, c.Name)
+			}
+
+			if mountPath == "/" {
+				return fmt.Errorf("%w: container %s tmpfs mount_path '/' is not allowed", ErrInvalidInput, c.Name)
+			}
+
+			if _, exists := seenMountPaths[mountPath]; exists {
+				return fmt.Errorf("%w: container %s duplicate mount_path %s", ErrInvalidInput, c.Name, mountPath)
+			}
+
+			seenMountPaths[mountPath] = struct{}{}
+		}
 	}
 
 	for _, p := range req.Spec.Ports {
@@ -546,6 +571,11 @@ func (s *Service) createSandboxOnNode(ctx context.Context, sbx types.Sandbox) er
 			Args:         append([]string(nil), c.Args...),
 			Env:          append([]string(nil), c.Env...),
 			WorkDir:      c.WorkDir,
+			CapAdd:       append([]string(nil), c.CapAdd...),
+			CapDrop:      append([]string(nil), c.CapDrop...),
+			SecurityOpt:  append([]string(nil), c.SecurityOpt...),
+			ReadOnly:     c.ReadOnly,
+			Tmpfs:        make([]model.TmpfsMount, 0, len(c.Tmpfs)),
 			VolumeMounts: make([]model.VolumeMount, 0, len(c.VolumeMounts)),
 			Resource: model.ResourceSpec{
 				CPU:              c.Resource.CPU,
@@ -560,6 +590,13 @@ func (s *Service) createSandboxOnNode(ctx context.Context, sbx types.Sandbox) er
 				Name:      vm.Name,
 				MountPath: vm.MountPath,
 				ReadOnly:  vm.ReadOnly,
+			})
+		}
+
+		for _, tm := range c.Tmpfs {
+			last.Tmpfs = append(last.Tmpfs, model.TmpfsMount{
+				MountPath: tm.MountPath,
+				Options:   tm.Options,
 			})
 		}
 	}

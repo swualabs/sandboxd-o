@@ -39,7 +39,7 @@ func UpdateSbxctlConfig(ctx context.Context, ssmc *ssm.Client, st *store.Store, 
 	s.Step("merging sbxctl_config.json (server=%s)", server)
 	configJSON, err := userdata.MergeConfig("sbxctl", "", cluster.SharedSecret, map[string]any{
 		"server": server,
-	})
+	}, nil)
 
 	if err != nil {
 		return fmt.Errorf("build sbxctl config: %w", err)

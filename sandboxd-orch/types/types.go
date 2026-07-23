@@ -137,6 +137,11 @@ type SandboxVolumeMount struct {
 	ReadOnly  bool   `json:"read_only,omitempty" yaml:"read_only,omitempty"`
 }
 
+type SandboxTmpfsMount struct {
+	MountPath string `json:"mount_path" yaml:"mount_path"`
+	Options   string `json:"options,omitempty" yaml:"options,omitempty"`
+}
+
 type ReadinessProbeSpec struct {
 	Protocol            string `json:"protocol" yaml:"protocol"`
 	Port                int    `json:"port" yaml:"port"`
@@ -154,6 +159,11 @@ type SandboxContainerSpec struct {
 	Args         []string             `json:"args,omitempty" yaml:"args,omitempty"`
 	Env          []string             `json:"env,omitempty" yaml:"env,omitempty"`
 	WorkDir      string               `json:"work_dir,omitempty" yaml:"work_dir,omitempty"`
+	CapAdd       []string             `json:"cap_add,omitempty" yaml:"cap_add,omitempty"`
+	CapDrop      []string             `json:"cap_drop,omitempty" yaml:"cap_drop,omitempty"`
+	SecurityOpt  []string             `json:"security_opt,omitempty" yaml:"security_opt,omitempty"`
+	ReadOnly     bool                 `json:"read_only,omitempty" yaml:"read_only,omitempty"`
+	Tmpfs        []SandboxTmpfsMount  `json:"tmpfs,omitempty" yaml:"tmpfs,omitempty"`
 	VolumeMounts []SandboxVolumeMount `json:"volume_mounts,omitempty" yaml:"volume_mounts,omitempty"`
 	Resource     SandboxResource      `json:"resource" yaml:"resource"`
 }

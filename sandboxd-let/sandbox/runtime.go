@@ -386,17 +386,37 @@ func (s *Service) createAndStartCRIContainer(ctx context.Context, sbx *model.San
 	}
 
 	// t := time.Now()
-	tmpHostPath, err := s.ensureSandboxTmpfsMount(sbx.ID, c.Name, "tmp", lim.TmpfsBytes)
-	// slog.Info("perf.stage", slog.String("sandbox", sbx.ID), slog.String("container", c.Name), slog.String("stage", "container.ensure_tmpfs_mount"), slog.Duration("duration", time.Since(t)))
-	if err != nil {
-		return model.ContainerState{}, err
+	if !hasTmpfsMountAt(c.Tmpfs, "/tmp") {
+		tmpHostPath, err := s.ensureSandboxTmpfsMount(sbx.ID, c.Name, "tmp", lim.TmpfsBytes)
+		// slog.Info("perf.stage", slog.String("sandbox", sbx.ID), slog.String("container", c.Name), slog.String("stage", "container.ensure_tmpfs_mount"), slog.Duration("duration", time.Since(t)))
+		if err != nil {
+			return model.ContainerState{}, err
+		}
+
+		if tmpHostPath != "" {
+			mounts = append(mounts, &runtimeapi.Mount{
+				ContainerPath: "/tmp",
+				HostPath:      tmpHostPath,
+				Readonly:      false,
+			})
+		}
 	}
 
-	if tmpHostPath != "" {
+	for _, tm := range c.Tmpfs {
+		resolved, err := resolveTmpfsMountSpec(tm)
+		if err != nil {
+			return model.ContainerState{}, fmt.Errorf("tmpfs %s: %w", tm.MountPath, err)
+		}
+
+		hostPath, err := s.ensureSandboxCustomTmpfsMount(sbx.ID, c.Name, resolved)
+		if err != nil {
+			return model.ContainerState{}, err
+		}
+
 		mounts = append(mounts, &runtimeapi.Mount{
-			ContainerPath: "/tmp",
-			HostPath:      tmpHostPath,
-			Readonly:      false,
+			ContainerPath: resolved.MountPath,
+			HostPath:      hostPath,
+			Readonly:      resolved.ReadOnly,
 		})
 	}
 
@@ -431,12 +451,7 @@ func (s *Service) createAndStartCRIContainer(ctx context.Context, sbx *model.San
 				Unified:            map[string]string{"pids.max": fmt.Sprintf("%d", lim.PidsLimit)},
 			},
 			SecurityContext: &runtimeapi.LinuxContainerSecurityContext{
-				Privileged:     false,
-				ReadonlyRootfs: false,
-				NoNewPrivs:     true,
-				Seccomp: &runtimeapi.SecurityProfile{
-					ProfileType: runtimeapi.SecurityProfile_RuntimeDefault,
-				},
+				Privileged: false,
 				MaskedPaths: []string{
 					"/proc/acpi",
 					"/proc/kcore",
@@ -455,6 +470,16 @@ func (s *Service) createAndStartCRIContainer(ctx context.Context, sbx *model.San
 		},
 		Mounts: mounts,
 	}
+	securityContext := ctrCfg.Linux.SecurityContext
+	resolvedSec, err := resolveContainerSecurityOptions(c)
+	if err != nil {
+		return model.ContainerState{}, fmt.Errorf("container %s: %w", c.Name, err)
+	}
+	securityContext.Capabilities = resolvedSec.Capabilities
+	securityContext.ReadonlyRootfs = c.ReadOnly
+	securityContext.NoNewPrivs = resolvedSec.NoNewPrivs
+	securityContext.Seccomp = resolvedSec.Seccomp
+	securityContext.Apparmor = resolvedSec.AppArmor
 	if c.WorkDir != "" {
 		ctrCfg.WorkingDir = c.WorkDir
 	}
@@ -493,6 +518,11 @@ func (s *Service) createAndStartCRIContainer(ctx context.Context, sbx *model.San
 		Image:        normalizeImage(c.Image),
 		Args:         c.Args,
 		Env:          c.Env,
+		CapAdd:       append([]string(nil), c.CapAdd...),
+		CapDrop:      append([]string(nil), c.CapDrop...),
+		SecurityOpt:  append([]string(nil), c.SecurityOpt...),
+		ReadOnly:     c.ReadOnly,
+		Tmpfs:        append([]model.TmpfsMount(nil), c.Tmpfs...),
 		VolumeMounts: append([]model.VolumeMount(nil), c.VolumeMounts...),
 		Resource:     c.Resource,
 		TaskPID:      details.PID,
@@ -577,6 +607,17 @@ func (s *Service) ensureSandboxTmpfsMount(sandboxID, containerName, kind string,
 	}
 
 	return resolvedBase, nil
+}
+
+func hasTmpfsMountAt(mounts []model.TmpfsMount, mountPath string) bool {
+	want := strings.TrimSpace(mountPath)
+	for _, mount := range mounts {
+		if strings.TrimSpace(mount.MountPath) == want {
+			return true
+		}
+	}
+
+	return false
 }
 
 func isMountPoint(path string) bool {

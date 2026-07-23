@@ -231,7 +231,7 @@ func CreateCluster(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc
 		s.Warn("using operator-supplied shared secret for cluster auth; treat this as sensitive and prefer the default random secret unless you have a strong operational reason")
 	}
 
-	configJSON, err := userdata.MergeConfig("sbxorch", in.OrchConfigPath, sharedSecret, nil)
+	configJSON, err := userdata.MergeConfig("sbxorch", in.OrchConfigPath, sharedSecret, nil, nil)
 	if err != nil {
 		return fmt.Errorf("build sbxorch config: %w", err)
 	}

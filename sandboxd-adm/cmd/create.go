@@ -79,7 +79,7 @@ func newCreateClusterCommand(opts *Options) *cobra.Command {
 }
 
 func newCreateWorkerCommand(opts *Options) *cobra.Command {
-	in := orchestrate.CreateWorkerInput{}
+	in := orchestrate.CreateWorkerInput{RuntimeBinary: "runsc"}
 
 	cmd := &cobra.Command{
 		Use:   "worker <name>",
@@ -124,6 +124,7 @@ func newCreateWorkerCommand(opts *Options) *cobra.Command {
 	cmd.Flags().StringVar(&in.Version, "version", "", "sandboxd-o release version to install, e.g. 0.3.0 (required)")
 	cmd.Flags().StringVar(&in.ClusterName, "cluster", "", "cluster name (required)")
 	cmd.Flags().StringVar(&in.InstanceType, "instance", "", "worker EC2 instance type (required)")
+	cmd.Flags().StringVar(&in.RuntimeBinary, "runtime-binary", "runsc", "worker container runtime handler to use: runsc (default) or runc")
 	cmd.Flags().StringVar(&in.RootVolume, "root-volume-size", "64Gi", "worker root EBS volume size")
 	cmd.Flags().StringVar(&in.External, "external", "", "external hostname; defaults to the worker's own Elastic IP when left empty")
 	cmd.Flags().StringVar(&in.PublicEIP, "public-eip", "", "existing Elastic IP ARN or allocation id; without it, sbxadm allocates and manages its own EIP automatically")
