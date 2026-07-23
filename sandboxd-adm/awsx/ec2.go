@@ -194,6 +194,69 @@ func TerminateInstance(ctx context.Context, c *ec2.Client, instanceID string) er
 	return nil
 }
 
+func ResizeInstanceType(ctx context.Context, c *ec2.Client, instanceID, instanceType string) error {
+	if instanceID == "" {
+		return fmt.Errorf("instance id is required")
+	}
+
+	if instanceType == "" {
+		return fmt.Errorf("instance type is required")
+	}
+
+	if _, err := c.StopInstances(ctx, &ec2.StopInstancesInput{InstanceIds: []string{instanceID}}); err != nil {
+		if !isIncorrectInstanceStateForAlreadyStopped(err) {
+			return fmt.Errorf("stop instance %q: %w", instanceID, err)
+		}
+	}
+
+	stoppedWaiter := ec2.NewInstanceStoppedWaiter(c)
+	if err := stoppedWaiter.Wait(ctx, &ec2.DescribeInstancesInput{InstanceIds: []string{instanceID}}, 10*time.Minute); err != nil {
+		return fmt.Errorf("wait for instance %q stopped: %w", instanceID, err)
+	}
+
+	if _, err := c.ModifyInstanceAttribute(ctx, &ec2.ModifyInstanceAttributeInput{
+		InstanceId: aws.String(instanceID),
+		InstanceType: &ec2types.AttributeValue{
+			Value: aws.String(instanceType),
+		},
+	}); err != nil {
+		return fmt.Errorf("modify instance %q type to %q: %w", instanceID, instanceType, err)
+	}
+
+	if _, err := c.StartInstances(ctx, &ec2.StartInstancesInput{InstanceIds: []string{instanceID}}); err != nil {
+		return fmt.Errorf("start instance %q: %w", instanceID, err)
+	}
+
+	runningWaiter := ec2.NewInstanceRunningWaiter(c)
+	if err := runningWaiter.Wait(ctx, &ec2.DescribeInstancesInput{InstanceIds: []string{instanceID}}, 10*time.Minute); err != nil {
+		return fmt.Errorf("wait for instance %q running: %w", instanceID, err)
+	}
+
+	return nil
+}
+
+func DescribeInstanceNetwork(ctx context.Context, c *ec2.Client, instanceID string) (privateIP, publicIP string, err error) {
+	out, err := c.DescribeInstances(ctx, &ec2.DescribeInstancesInput{InstanceIds: []string{instanceID}})
+	if err != nil {
+		return "", "", fmt.Errorf("describe instance %q: %w", instanceID, err)
+	}
+
+	if len(out.Reservations) == 0 || len(out.Reservations[0].Instances) == 0 {
+		return "", "", fmt.Errorf("instance %q not found", instanceID)
+	}
+
+	inst := out.Reservations[0].Instances[0]
+	if inst.PrivateIpAddress != nil {
+		privateIP = *inst.PrivateIpAddress
+	}
+
+	if inst.PublicIpAddress != nil {
+		publicIP = *inst.PublicIpAddress
+	}
+
+	return privateIP, publicIP, nil
+}
+
 func AssociateEIPByAllocationID(ctx context.Context, c *ec2.Client, instanceID, allocationID string) (string, error) {
 	_, err := c.AssociateAddress(ctx, &ec2.AssociateAddressInput{
 		InstanceId:   aws.String(instanceID),

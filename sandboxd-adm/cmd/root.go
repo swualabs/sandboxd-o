@@ -67,6 +67,7 @@ func NewRoot() *cobra.Command {
 
 	root.AddCommand(newCreateCommand(opts))
 	root.AddCommand(newInfoCommand(opts))
+	root.AddCommand(newResizeCommand(opts))
 	root.AddCommand(newDeleteCommand(opts))
 	root.AddCommand(newUpdateSbxctlConfigCommand(opts))
 
