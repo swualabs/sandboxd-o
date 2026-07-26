@@ -32,3 +32,29 @@ spec:
 		t.Fatalf("ephemeral_storage=%q", got)
 	}
 }
+
+func TestParseManifest_NodeMetadataLabels(t *testing.T) {
+	raw := []byte(`
+apiVersion: sandboxd.o/v1
+kind: Node
+id: n1
+metadata:
+  labels:
+    node-type: example
+    region: ap-northeast-2
+spec:
+  ip: 127.0.0.1
+  port: 8081
+  unschedulable: false
+`)
+	out, err := ParseManifest(raw)
+	if err != nil {
+		t.Fatalf("ParseManifest err=%v", err)
+	}
+
+	metadata, _ := out["metadata"].(map[string]any)
+	labels, _ := metadata["labels"].(map[string]any)
+	if labels["node-type"] != "example" || labels["region"] != "ap-northeast-2" {
+		t.Fatalf("labels=%v", labels)
+	}
+}

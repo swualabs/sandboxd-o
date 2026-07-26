@@ -25,6 +25,7 @@ const (
 
 type Node struct {
 	ID            string        `json:"id"`
+	Metadata      ObjectMeta    `json:"metadata,omitempty"`
 	IP            string        `json:"ip"`
 	Port          int           `json:"port"`
 	Unschedulable bool          `json:"unschedulable"`
@@ -61,6 +62,10 @@ type RegisterNodeRequest struct {
 	Unschedulable bool   `json:"unschedulable"`
 }
 
+type ObjectMeta struct {
+	Labels map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
+}
+
 type APIServerConfig struct {
 	ListenAddress string `yaml:"listenAddress"`
 }
@@ -72,8 +77,9 @@ type StaticNode struct {
 }
 
 type CreateNodeObjectRequest struct {
-	ID   string         `json:"id" yaml:"id"`
-	Spec NodeObjectSpec `json:"spec" yaml:"spec"`
+	ID       string         `json:"id" yaml:"id"`
+	Metadata ObjectMeta     `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	Spec     NodeObjectSpec `json:"spec" yaml:"spec"`
 }
 
 type NodeObjectSpec struct {
@@ -83,11 +89,16 @@ type NodeObjectSpec struct {
 }
 
 type PatchNodeObjectRequest struct {
-	Spec PatchNodeObjectSpec `json:"spec"`
+	Metadata *PatchNodeObjectMeta `json:"metadata,omitempty"`
+	Spec     PatchNodeObjectSpec  `json:"spec"`
+}
+
+type PatchNodeObjectMeta struct {
+	Labels map[string]*string `json:"labels,omitempty"`
 }
 
 type PatchNodeObjectSpec struct {
-	Unschedulable *bool `json:"unschedulable"`
+	Unschedulable *bool `json:"unschedulable,omitempty"`
 }
 
 type CreateExternalObjectRequest struct {
@@ -120,6 +131,7 @@ type Sandbox struct {
 type SandboxSpec struct {
 	Egress         bool                   `json:"egress" yaml:"egress"`
 	TTLSeconds     int64                  `json:"ttl_seconds,omitempty" yaml:"ttl_seconds,omitempty"`
+	NodeSelector   map[string]string      `json:"node_selector,omitempty" yaml:"node_selector,omitempty"`
 	Ports          []SandboxPortSpec      `json:"ports,omitempty" yaml:"ports,omitempty"`
 	Volumes        []SandboxVolumeSpec    `json:"volumes,omitempty" yaml:"volumes,omitempty"`
 	Containers     []SandboxContainerSpec `json:"containers" yaml:"containers"`

@@ -239,6 +239,7 @@ Available Commands:
   delete      Delete resource
   get         Get resources
   help        Help about any command
+  label       Add, update, or remove a node label
   logs        Get sandbox logs via orchestrator node proxy
   spec        Print resource in YAML spec form
   uncordon    Mark node schedulable
@@ -263,6 +264,7 @@ The main available options are as follows:
 - `--secret`: The shared secret used to authenticate to the orchestrator. This option can also be configured through the config file (`shared_secret`) or the `SBX_SHARED_SECRET` environment variable. It must match the orchestrator's `shared_secret`.
 - `--node`: Specifies the target node ID when using the Proxied API. This allows API requests to be sent directly to a specific sbxlet instance. For example: `sandboxd-node-1`
 - `-o, --output`: Specifies the output format. Available options are `json`, `yaml`, and `wide`. Table output is used by default. The `logs` command always prints raw log lines.
+- `get nodes --show-labels`: Adds a `LABELS` column to node table output.
 
 The main available commands are as follows:
 
@@ -271,6 +273,7 @@ The main available commands are as follows:
 - `delete`: Used to delete resources. For example: `sbxctl delete node/sandboxd-node-1`. A specific resource must be explicitly specified.
 - `cordon`: Marks a Node as unschedulable so the scheduler stops placing new sandboxes on it while existing sandboxes keep running. For example: `sbxctl cordon node/sandboxd-node-1`
 - `uncordon`: Marks a Node schedulable again. For example: `sbxctl uncordon node/sandboxd-node-1`
+- `label`: Adds, updates, or removes a Node label through the orchestrator API. For example: `sbxctl label node/sandboxd-node-1 region=ap-northeast-2` or `sbxctl label node/sandboxd-node-1 region-`
 - `logs`: Used to retrieve sandbox-level logs with each line prefixed by the container name. For example: `sbxctl logs s/sbx-wordpress-demo` returns lines such as `[app] ...` and `[db] ...`. For backward compatibility, `sbxctl logs s/sbx-wordpress-demo app` still retrieves only the `app` container logs. Use `sbxctl logs s/sbx-wordpress-demo --watch` to poll logs and print newly added lines. Internally, this command uses sbxorch's Proxied API to send requests directly to the sbxlet instance running on the target node and retrieve logs.
 
 ## Sandboxd Admin CLI(sbxadm)
@@ -363,10 +366,13 @@ sbxadm create worker my-worker-1 \
   --instance t3.xlarge \
   --runtime-binary runsc \
   --root-volume-size 64Gi \
+  --node-labels region=ap-northeast-2,node-type=general \
   --external host1.example.com
 ```
 
 Worker nodes always land in a public subnet, round-robined across the cluster's public subnets. If `--public-eip` is omitted, the worker's Elastic IP is also allocated and managed automatically, same as the control plane; if `--external` is omitted, that Elastic IP's address is registered as the External value automatically.
+
+`--node-labels` is optional and registers `metadata.labels` on the worker's Node object at creation time, so sbxorch can immediately use those labels for `Sandbox.spec.node_selector` scheduling.
 
 If you do pass a hostname to `--external` (like `host1.example.com` above) instead of letting it default to the worker's IP, `sbxadm` only registers that value with the orchestrator — it does not create or manage any DNS record. You're responsible for pointing an A record at the worker's actual public IP (from `sbxadm info worker`) at your DNS provider yourself; see the note under [External](#external) below.
 
@@ -561,6 +567,7 @@ sbxadm create worker my-worker-1 \
   --version 0.5.0 \
   --instance t3.xlarge \
   --root-volume-size 64Gi \
+  --node-labels region=ap-northeast-2,node-type=general \
   --ecr-repos "my-repo-1,ctf-*" \
   --external host1.example.com
 ```
@@ -637,6 +644,10 @@ It is a resource used to register an installed sbxlet instance with sbxorch and 
 apiVersion: sandboxd.o/v1
 kind: Node
 id: sandboxd-node-1
+metadata:
+    labels:
+        node-type: general
+        region: ap-northeast-2
 spec:
     ip: '127.0.0.1'
     port: 8081
@@ -656,6 +667,7 @@ Node status can be one of `Ready`, `NotReady`, or `Unknown`, and sandboxes can o
 - The `Unknown` state occurs when a node has been newly registered and no Heartbeat has been received yet, or when the Threshold or Grace Period has not elapsed sufficiently to determine its status.
 - The `NotReady` state occurs when a node has not sent a Heartbeat for a certain period of time, or when a Heartbeat was received but the Threshold or Grace Period conditions were not satisfied for the node to be considered `Ready`.
 - Setting `spec.unschedulable: true` is a scheduling policy, not a health status. Existing sandboxes on that node remain untouched, but new sandboxes will no longer be scheduled there until the node is uncordoned.
+- `metadata.labels` is optional. These labels are used only by sbxorch's scheduler for exact-match sandbox placement via `spec.node_selector`.
 
 ## External
 
@@ -704,6 +716,8 @@ id: sbx-wordpress-demo
 spec:
     egress: true
     ttl_seconds: 3600
+    node_selector:
+        region: ap-northeast-2
     ports:
         - container_port: 80
           protocol: tcp
@@ -744,11 +758,13 @@ spec:
 
 The description of each field is as follows.
 
-### egress, ttl_seconds, ports
+### egress, ttl_seconds, node_selector, ports
 
 - `egress`: Determines whether this sandbox is allowed to send outbound traffic to external networks. When set to `true`, outbound traffic from the sandbox to external networks is allowed. When set to `false`, outbound traffic is blocked. This behavior is enforced by sbxlet's networking model.
 
 - `ttl_seconds`: The amount of time (in seconds) before the sandbox is automatically terminated after creation. If this value is `0` or not specified, the sandbox continues running until it is manually deleted. If a positive value is specified, the sandbox is automatically terminated after the configured duration has elapsed. This mechanism is implemented through the Reconcile Loop, which detects and terminates sandboxes whose TTL has expired.
+
+- `node_selector`: Optional exact-match label selector for choosing candidate Nodes. This behaves like Kubernetes `nodeSelector`: every key/value pair must exist on the Node with the same value, and multiple entries are evaluated with logical AND. This is a scheduler filter only; it does not implement node affinity, anti-affinity, or taint/toleration behavior.
 
 - `ports`: The list of ports to expose from this sandbox. Each port consists of `container_port` and `protocol`. `container_port` specifies the port number exposed inside the sandbox, while `protocol` specifies the protocol used for that port. Currently, `tcp` and `udp` are supported. This field is optional, and if omitted, no ports are exposed.
 
@@ -768,6 +784,8 @@ The description of each field is as follows.
 Therefore, in the `wordpress.yaml` example above, the sandbox is automatically terminated by the Reconcile Loop after one hour (3600 seconds) from creation, and TCP port `80` is exposed inside the sandbox.
 
 Additionally, since `egress` is set to `true`, outbound traffic to external networks is permitted for this sandbox.
+
+If `node_selector` is set and no `Ready` and schedulable Node matches all requested labels, the sandbox remains unschedulable and fails with the same control-plane scheduling error path used for other infeasible placements.
 
 ### volumes
 

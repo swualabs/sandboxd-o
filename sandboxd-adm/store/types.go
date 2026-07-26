@@ -49,18 +49,19 @@ type ControlPlane struct {
 }
 
 type Worker struct {
-	Name             string    `dynamodbav:"name"`
-	InstanceID       string    `dynamodbav:"instance_id"`
-	InstanceType     string    `dynamodbav:"instance_type"`
-	SubnetID         string    `dynamodbav:"subnet_id"`
-	SecurityGroup    string    `dynamodbav:"security_group_id"`
-	PublicEIPAllocID string    `dynamodbav:"public_eip_alloc_id,omitempty"`
-	PublicEIPManaged bool      `dynamodbav:"public_eip_managed,omitempty"`
-	PublicIP         string    `dynamodbav:"public_ip,omitempty"`
-	PrivateIP        string    `dynamodbav:"private_ip"`
-	RootVolumeSizeGB int32     `dynamodbav:"root_volume_size_gb"`
-	External         string    `dynamodbav:"external,omitempty"`
-	ConfigJSON       string    `dynamodbav:"config_json,omitempty"`
-	CreatedAt        time.Time `dynamodbav:"created_at"`
-	UpdatedAt        time.Time `dynamodbav:"updated_at"`
+	Name             string            `dynamodbav:"name"`
+	InstanceID       string            `dynamodbav:"instance_id"`
+	InstanceType     string            `dynamodbav:"instance_type"`
+	SubnetID         string            `dynamodbav:"subnet_id"`
+	SecurityGroup    string            `dynamodbav:"security_group_id"`
+	NodeLabels       map[string]string `dynamodbav:"node_labels,omitempty"`
+	PublicEIPAllocID string            `dynamodbav:"public_eip_alloc_id,omitempty"`
+	PublicEIPManaged bool              `dynamodbav:"public_eip_managed,omitempty"`
+	PublicIP         string            `dynamodbav:"public_ip,omitempty"`
+	PrivateIP        string            `dynamodbav:"private_ip"`
+	RootVolumeSizeGB int32             `dynamodbav:"root_volume_size_gb"`
+	External         string            `dynamodbav:"external,omitempty"`
+	ConfigJSON       string            `dynamodbav:"config_json,omitempty"`
+	CreatedAt        time.Time         `dynamodbav:"created_at"`
+	UpdatedAt        time.Time         `dynamodbav:"updated_at"`
 }

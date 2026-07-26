@@ -21,6 +21,9 @@ func TestSandboxRepo_CRUDAndPortReservation(t *testing.T) {
 		ID: "sbx-1",
 		Spec: types.SandboxSpec{
 			Egress: true,
+			NodeSelector: map[string]string{
+				"node-type": "example",
+			},
 			Containers: []types.SandboxContainerSpec{{
 				Name:     "web",
 				Image:    "nginx",
@@ -40,6 +43,9 @@ func TestSandboxRepo_CRUDAndPortReservation(t *testing.T) {
 
 	if got.ID != "sbx-1" || got.Status.Phase != types.SandboxPhasePending {
 		t.Fatalf("unexpected sandbox: %+v", got)
+	}
+	if got.Spec.NodeSelector["node-type"] != "example" {
+		t.Fatalf("nodeSelector=%v", got.Spec.NodeSelector)
 	}
 
 	ports := []types.SandboxPortAssign{{HostPort: 10001, ContainerPort: 80, Protocol: "tcp"}}

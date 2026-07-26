@@ -80,6 +80,7 @@ func newCreateClusterCommand(opts *Options) *cobra.Command {
 
 func newCreateWorkerCommand(opts *Options) *cobra.Command {
 	in := orchestrate.CreateWorkerInput{RuntimeBinary: "runsc"}
+	var nodeLabels string
 
 	cmd := &cobra.Command{
 		Use:   "worker <name>",
@@ -89,6 +90,11 @@ func newCreateWorkerCommand(opts *Options) *cobra.Command {
 			in.Name = args[0]
 			in.OrchServer = opts.OrchServer
 			in.OrchTimeout = opts.Timeout
+			labels, err := parseNodeLabelsCSV(nodeLabels)
+			if err != nil {
+				return fmt.Errorf("--node-labels: %w", err)
+			}
+			in.NodeLabels = labels
 
 			if err := requireFlags(
 				requiredFlag{"--version", in.Version},
@@ -128,6 +134,7 @@ func newCreateWorkerCommand(opts *Options) *cobra.Command {
 	cmd.Flags().StringVar(&in.RootVolume, "root-volume-size", "64Gi", "worker root EBS volume size")
 	cmd.Flags().StringVar(&in.External, "external", "", "external hostname; defaults to the worker's own Elastic IP when left empty")
 	cmd.Flags().StringVar(&in.PublicEIP, "public-eip", "", "existing Elastic IP ARN or allocation id; without it, sbxadm allocates and manages its own EIP automatically")
+	cmd.Flags().StringVar(&nodeLabels, "node-labels", "", "comma-separated node labels to register on the worker Node object, e.g. \"region=ap-northeast-2,node-type=general\"")
 	cmd.Flags().StringVar(&in.ConfigPath, "config", "", "JSON file overriding sbxlet_config.json defaults (only changed keys need to be present)")
 	cmd.Flags().StringVar(&in.ECRRepos, "ecr-repos", "", "comma-separated private ECR repository name patterns to grant pull access to, e.g. \"my-repo-1,ctf-*\"; wildcards allowed, applies to every worker in the cluster")
 
@@ -150,6 +157,30 @@ func splitCSV(raw string) []string {
 	}
 
 	return out
+}
+
+func parseNodeLabelsCSV(raw string) (map[string]string, error) {
+	parts := splitCSV(raw)
+	if len(parts) == 0 {
+		return nil, nil
+	}
+
+	labels := make(map[string]string, len(parts))
+	for _, part := range parts {
+		key, value, ok := strings.Cut(part, "=")
+		if !ok {
+			return nil, fmt.Errorf("invalid label %q (expected key=value)", part)
+		}
+
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return nil, fmt.Errorf("label key is required")
+		}
+
+		labels[key] = strings.TrimSpace(value)
+	}
+
+	return labels, nil
 }
 
 type requiredFlag struct {

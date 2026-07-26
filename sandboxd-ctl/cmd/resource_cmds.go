@@ -14,6 +14,7 @@ import (
 )
 
 func newGetCommand(opts *Options) *cobra.Command {
+	var showLabels bool
 	cmd := &cobra.Command{
 		Use:     "get <resource[,resource...]|resource/name>",
 		Aliases: []string{"g"},
@@ -120,9 +121,9 @@ func newGetCommand(opts *Options) *cobra.Command {
 						}
 
 						if outMode == "wide" {
-							printNodeTableWide(cmd.OutOrStdout(), rows)
+							printNodeTableWide(cmd.OutOrStdout(), rows, showLabels)
 						} else {
-							printNodeTable(cmd.OutOrStdout(), rows)
+							printNodeTable(cmd.OutOrStdout(), rows, showLabels)
 						}
 					} else {
 						rows := extractExternalRows(out["items"])
@@ -152,6 +153,8 @@ func newGetCommand(opts *Options) *cobra.Command {
 			return printAny(cmd.OutOrStdout(), combined, outMode)
 		},
 	}
+
+	cmd.Flags().BoolVar(&showLabels, "show-labels", false, "show node labels in table output")
 
 	return cmd
 }
@@ -244,6 +247,9 @@ func newCreateCommand(opts *Options) *cobra.Command {
 					return fmt.Errorf("--node is not applicable for node object create")
 				}
 				req := map[string]any{"id": payload["id"], "spec": payload["spec"]}
+				if metadata, ok := payload["metadata"]; ok {
+					req["metadata"] = metadata
+				}
 				out, err = c.CreateNodeObject(ctx, req)
 			case "external":
 				if strings.TrimSpace(opts.Node) != "" {

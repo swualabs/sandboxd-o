@@ -1,0 +1,43 @@
+apiVersion: sandboxd.o/v1
+kind: Node
+id: example-node-1
+metadata:
+  labels:
+    node-type: example
+    region: ap-northeast-2
+spec:
+  ip: "127.0.0.1"
+  port: 8081
+  unschedulable: false
+---
+apiVersion: sandboxd.o/v1
+kind: Sandbox
+id: sbx-nginx
+spec:
+  egress: true
+  ttl_seconds: 3600
+  node_selector:
+    node-type: example
+    region: ap-northeast-2
+  ports:
+    - container_port: 80
+      protocol: tcp
+  readiness_probe:
+    protocol: http
+    path: /
+    port: 80
+    initial_delay_seconds: 10
+    period_seconds: 5
+    timeout_seconds: 1
+    success_threshold: 1
+    failure_threshold: 5
+  containers:
+    - name: app
+      image: nginx:latest
+      args: []
+      env: []
+      work_dir: ""
+      resource:
+        cpu: 150m
+        memory: 64Mi
+        ephemeral_storage: 96Mi

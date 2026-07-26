@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"sandboxd-o/sandboxd-adm/color"
@@ -71,6 +72,7 @@ func printWorkerInfo(cmd *cobra.Command, w store.Worker) {
 	fmt.Fprintf(out, "Worker Node Private IP:         %s\n", w.PrivateIP)
 	fmt.Fprintf(out, "Worker Node Root Volume Size:   %dGi\n", w.RootVolumeSizeGB)
 	fmt.Fprintf(out, "Worker Node Security Group:     %s\n", w.SecurityGroup)
+	fmt.Fprintf(out, "Worker Node Labels:             %s\n", formatNodeLabels(w.NodeLabels))
 	if w.External != "" {
 		fmt.Fprintf(out, "Worker Node External:           %s\n", w.External)
 	}
@@ -154,6 +156,7 @@ func printClusterInfo(cmd *cobra.Command, c *store.Cluster) {
 		fmt.Fprintf(out, "Cluster Worker Node - %s / Private IP:           %s\n", w.Name, w.PrivateIP)
 		fmt.Fprintf(out, "Cluster Worker Node - %s / Root Volume Size:     %dGi\n", w.Name, w.RootVolumeSizeGB)
 		fmt.Fprintf(out, "Cluster Worker Node - %s / Security Group:       %s\n", w.Name, w.SecurityGroup)
+		fmt.Fprintf(out, "Cluster Worker Node - %s / Labels:               %s\n", w.Name, formatNodeLabels(w.NodeLabels))
 		if w.External != "" {
 			fmt.Fprintf(out, "Cluster Worker Node - %s / External:              %s\n", w.Name, w.External)
 		}
@@ -196,4 +199,17 @@ func indent(jsonStr string) string {
 		}
 	}
 	return out.String()
+}
+
+func formatNodeLabels(labels map[string]string) string {
+	if len(labels) == 0 {
+		return "(none)"
+	}
+
+	parts := make([]string, 0, len(labels))
+	for key, value := range labels {
+		parts = append(parts, key+"="+value)
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ",")
 }

@@ -37,12 +37,13 @@ func newFakeRepo(nodes ...types.Node) *fakeRepo {
 
 func (r *fakeRepo) Close() error { return nil }
 
-func (r *fakeRepo) UpsertNode(ctx context.Context, name, ip string, port int, unschedulable bool, source string) error {
+func (r *fakeRepo) UpsertNode(ctx context.Context, name, ip string, port int, unschedulable bool, labels map[string]string, source string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	n := r.nodes[name]
 	n.ID, n.IP, n.Port, n.Source, n.Unschedulable = name, ip, port, source, unschedulable
+	n.Metadata.Labels = labels
 	n.SbxletBaseURL = "http://" + ip + ":" + "18080"
 	r.nodes[name] = n
 	return nil
@@ -248,6 +249,10 @@ func TestCreateNodeAndExternalObjects(t *testing.T) {
 	s := testSvc(r, config.Config{ProbeTimeout: 10 * time.Millisecond, ReadySuccessThreshold: 1, NotReadyFailureThreshold: 1})
 	if _, err := s.CreateNodeObject(context.Background(), types.CreateNodeObjectRequest{
 		ID: "n-ext",
+		Metadata: types.ObjectMeta{Labels: map[string]string{
+			"node-type": "example",
+			"region":    "ap-northeast-2",
+		}},
 		Spec: types.NodeObjectSpec{
 			IP:            "127.0.0.1",
 			Port:          8081,
@@ -275,13 +280,17 @@ func TestCreateNodeAndExternalObjects(t *testing.T) {
 		t.Fatal("expected node to be unschedulable")
 	}
 
+	if n.Metadata.Labels["node-type"] != "example" || n.Metadata.Labels["region"] != "ap-northeast-2" {
+		t.Fatalf("labels=%v", n.Metadata.Labels)
+	}
+
 	if err := s.UpsertExternalObject(context.Background(), types.CreateExternalObjectRequest{}); err == nil {
 		t.Fatal("expected validation error")
 	}
 }
 
 func TestPatchNodeObject(t *testing.T) {
-	r := newFakeRepo(types.Node{ID: "n1", IP: "127.0.0.1", Port: 8081})
+	r := newFakeRepo(types.Node{ID: "n1", IP: "127.0.0.1", Port: 8081, Metadata: types.ObjectMeta{Labels: map[string]string{"old": "value"}}})
 	s := testSvc(r, config.Config{})
 
 	enabled := true
@@ -294,6 +303,27 @@ func TestPatchNodeObject(t *testing.T) {
 
 	if !n.Unschedulable {
 		t.Fatal("expected node to be unschedulable after patch")
+	}
+
+	value := "new"
+	n, err = s.PatchNodeObject(context.Background(), "n1", types.PatchNodeObjectRequest{
+		Metadata: &types.PatchNodeObjectMeta{
+			Labels: map[string]*string{
+				"env": &value,
+				"old": nil,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("PatchNodeObject labels err=%v", err)
+	}
+
+	if n.Metadata.Labels["env"] != "new" {
+		t.Fatalf("env label=%q", n.Metadata.Labels["env"])
+	}
+
+	if _, ok := n.Metadata.Labels["old"]; ok {
+		t.Fatalf("expected old label removal, labels=%v", n.Metadata.Labels)
 	}
 
 	if _, err := s.PatchNodeObject(context.Background(), "n1", types.PatchNodeObjectRequest{}); !errors.Is(err, ErrInvalidInput) {
