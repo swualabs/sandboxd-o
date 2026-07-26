@@ -508,6 +508,31 @@ func TestCreateSandbox_RejectsInvalidEphemeralStorage(t *testing.T) {
 	}
 }
 
+func TestCreateSandbox_RejectsEmptyNodeSelectorKey(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	s := newServiceWithNode(t, server)
+	defer s.Close()
+
+	_, err := s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
+		ID: "sbx-invalid-selector",
+		Spec: types.SandboxSpec{
+			NodeSelector: map[string]string{
+				" ": "prod",
+			},
+			Containers: []types.SandboxContainerSpec{{
+				Name:     "app",
+				Image:    "ubuntu:24.04",
+				Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"},
+			}},
+		},
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput, got %v", err)
+	}
+}
+
 func TestCreateSandbox_RejectsInvalidSharedVolume(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	defer server.Close()

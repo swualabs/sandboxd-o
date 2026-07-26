@@ -24,6 +24,8 @@ type fakeRepo struct {
 	heartbeatUpdates int
 	resourceUpdates  int
 	listErr          error
+	upsertErr        error
+	unschedErr       error
 }
 
 func newFakeRepo(nodes ...types.Node) *fakeRepo {
@@ -38,6 +40,10 @@ func newFakeRepo(nodes ...types.Node) *fakeRepo {
 func (r *fakeRepo) Close() error { return nil }
 
 func (r *fakeRepo) UpsertNode(ctx context.Context, name, ip string, port int, unschedulable bool, labels map[string]string, source string) error {
+	if r.upsertErr != nil {
+		return r.upsertErr
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -114,6 +120,10 @@ func (r *fakeRepo) UpdateNodeResources(ctx context.Context, name string, res typ
 }
 
 func (r *fakeRepo) SetNodeUnschedulable(ctx context.Context, name string, unschedulable bool) error {
+	if r.unschedErr != nil {
+		return r.unschedErr
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -334,6 +344,108 @@ func TestPatchNodeObject(t *testing.T) {
 		Spec: types.PatchNodeObjectSpec{Unschedulable: &enabled},
 	}); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("expected not found for missing node, got=%v", err)
+	}
+}
+
+func TestCreateNodeObject_ErrorPaths(t *testing.T) {
+	t.Run("invalid input", func(t *testing.T) {
+		s := testSvc(newFakeRepo(), config.Config{})
+		_, err := s.CreateNodeObject(context.Background(), types.CreateNodeObjectRequest{
+			ID:   "n1",
+			Spec: types.NodeObjectSpec{IP: "bad-ip", Port: 8081},
+		})
+		if err == nil {
+			t.Fatal("expected validation error")
+		}
+	})
+
+	t.Run("upsert failure", func(t *testing.T) {
+		r := newFakeRepo()
+		r.upsertErr = errors.New("upsert failed")
+		s := testSvc(r, config.Config{})
+		_, err := s.CreateNodeObject(context.Background(), types.CreateNodeObjectRequest{
+			ID:   "n1",
+			Spec: types.NodeObjectSpec{IP: "127.0.0.1", Port: 8081},
+		})
+		if err == nil || err.Error() != "upsert failed" {
+			t.Fatalf("unexpected err=%v", err)
+		}
+	})
+}
+
+func TestPatchNodeObject_ErrorPaths(t *testing.T) {
+	t.Run("unschedulable update failure", func(t *testing.T) {
+		r := newFakeRepo(types.Node{ID: "n1", IP: "127.0.0.1", Port: 8081})
+		r.unschedErr = errors.New("set unsched failed")
+		s := testSvc(r, config.Config{})
+		value := true
+		_, err := s.PatchNodeObject(context.Background(), "n1", types.PatchNodeObjectRequest{
+			Spec: types.PatchNodeObjectSpec{Unschedulable: &value},
+		})
+		if err == nil || err.Error() != "set unsched failed" {
+			t.Fatalf("unexpected err=%v", err)
+		}
+	})
+
+	t.Run("label patch invalid key", func(t *testing.T) {
+		s := testSvc(newFakeRepo(types.Node{ID: "n1", IP: "127.0.0.1", Port: 8081}), config.Config{})
+		value := "prod"
+		_, err := s.PatchNodeObject(context.Background(), "n1", types.PatchNodeObjectRequest{
+			Metadata: &types.PatchNodeObjectMeta{
+				Labels: map[string]*string{" ": &value},
+			},
+		})
+		if !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("expected ErrInvalidInput, got=%v", err)
+		}
+	})
+
+	t.Run("label upsert failure", func(t *testing.T) {
+		r := newFakeRepo(types.Node{ID: "n1", IP: "127.0.0.1", Port: 8081, Source: "object"})
+		r.upsertErr = errors.New("upsert failed")
+		s := testSvc(r, config.Config{})
+		value := "prod"
+		_, err := s.PatchNodeObject(context.Background(), "n1", types.PatchNodeObjectRequest{
+			Metadata: &types.PatchNodeObjectMeta{
+				Labels: map[string]*string{"env": &value},
+			},
+		})
+		if err == nil || err.Error() != "upsert failed" {
+			t.Fatalf("unexpected err=%v", err)
+		}
+	})
+}
+
+func TestLabelHelpers(t *testing.T) {
+	got := sanitizeLabels(map[string]string{
+		" env ": " prod ",
+		" ":     "ignored",
+	})
+	if got["env"] != "prod" {
+		t.Fatalf("sanitizeLabels=%v", got)
+	}
+
+	value := " new "
+	labels, err := applyLabelPatch(map[string]string{"keep": "yes", "old": "value"}, map[string]*string{
+		"env": &value,
+		"old": nil,
+	})
+	if err != nil {
+		t.Fatalf("applyLabelPatch err=%v", err)
+	}
+	if labels["env"] != "new" || labels["keep"] != "yes" {
+		t.Fatalf("labels=%v", labels)
+	}
+	if _, ok := labels["old"]; ok {
+		t.Fatalf("expected old deletion, labels=%v", labels)
+	}
+
+	labels, err = applyLabelPatch(nil, map[string]*string{"gone": nil})
+	if err != nil {
+		t.Fatalf("applyLabelPatch empty err=%v", err)
+	}
+	if labels != nil {
+		t.Fatalf("expected nil labels, got=%v", labels)
 	}
 }
 
