@@ -58,25 +58,45 @@ func printSandboxTableWide(w io.Writer, items []map[string]string) {
 	_ = tw.Flush()
 }
 
-func printNodeTable(w io.Writer, items []map[string]string) {
+func printNodeTable(w io.Writer, items []map[string]string, showLabels bool) {
 	tw := tabwriter.NewWriter(w, 0, 8, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "NAME\tSTATE\tSCHEDULABLE\tIP\tPORT\tEXTERNAL\tUPDATED")
+	if showLabels {
+		_, _ = fmt.Fprintln(tw, "NAME\tSTATE\tSCHEDULABLE\tIP\tPORT\tEXTERNAL\tLABELS\tUPDATED")
+	} else {
+		_, _ = fmt.Fprintln(tw, "NAME\tSTATE\tSCHEDULABLE\tIP\tPORT\tEXTERNAL\tUPDATED")
+	}
 	for _, it := range items {
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", it["name"], it["state"], it["schedulable"], it["ip"], it["port"], it["external"], it["updated"])
+		if showLabels {
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", it["name"], it["state"], it["schedulable"], it["ip"], it["port"], it["external"], it["labels"], it["updated"])
+		} else {
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", it["name"], it["state"], it["schedulable"], it["ip"], it["port"], it["external"], it["updated"])
+		}
 	}
 
 	_ = tw.Flush()
 }
 
-func printNodeTableWide(w io.Writer, items []map[string]string) {
+func printNodeTableWide(w io.Writer, items []map[string]string, showLabels bool) {
 	tw := tabwriter.NewWriter(w, 0, 8, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "NAME\tSTATE\tSCHEDULABLE\tIP\tPORT\tEXTERNAL\tCPU(ALLOC/USED/AVAIL)\tMEM(ALLOC/USED/AVAIL)\tLAST_ERROR\tHEARTBEAT\tUPDATED")
+	if showLabels {
+		_, _ = fmt.Fprintln(tw, "NAME\tSTATE\tSCHEDULABLE\tIP\tPORT\tEXTERNAL\tLABELS\tCPU(ALLOC/USED/AVAIL)\tMEM(ALLOC/USED/AVAIL)\tLAST_ERROR\tHEARTBEAT\tUPDATED")
+	} else {
+		_, _ = fmt.Fprintln(tw, "NAME\tSTATE\tSCHEDULABLE\tIP\tPORT\tEXTERNAL\tCPU(ALLOC/USED/AVAIL)\tMEM(ALLOC/USED/AVAIL)\tLAST_ERROR\tHEARTBEAT\tUPDATED")
+	}
 	for _, it := range items {
-		_, _ = fmt.Fprintf(
-			tw,
-			"%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			it["name"], it["state"], it["schedulable"], it["ip"], it["port"], it["external"], it["cpu"], it["mem"], it["last_error"], it["last_heartbeat"], it["updated"],
-		)
+		if showLabels {
+			_, _ = fmt.Fprintf(
+				tw,
+				"%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				it["name"], it["state"], it["schedulable"], it["ip"], it["port"], it["external"], it["labels"], it["cpu"], it["mem"], it["last_error"], it["last_heartbeat"], it["updated"],
+			)
+		} else {
+			_, _ = fmt.Fprintf(
+				tw,
+				"%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				it["name"], it["state"], it["schedulable"], it["ip"], it["port"], it["external"], it["cpu"], it["mem"], it["last_error"], it["last_heartbeat"], it["updated"],
+			)
+		}
 	}
 
 	_ = tw.Flush()
@@ -214,6 +234,7 @@ func extractNodeRows(items any) []map[string]string {
 			"updated":        toString(m["updated_at"]),
 			"last_error":     toString(m["last_error"]),
 			"last_heartbeat": toString(m["last_heartbeat"]),
+			"labels":         formatLabels(m["metadata"]),
 			"cpu": fmt.Sprintf(
 				"%s/%s/%s",
 				formatMilli(res["allocatable_cpu_milli"]),
@@ -231,6 +252,31 @@ func extractNodeRows(items any) []map[string]string {
 
 	sort.Slice(rows, func(i, j int) bool { return rows[i]["name"] < rows[j]["name"] })
 	return rows
+}
+
+func formatLabels(metadata any) string {
+	m, ok := metadata.(map[string]any)
+	if !ok {
+		return "-"
+	}
+
+	raw, ok := m["labels"].(map[string]any)
+	if !ok || len(raw) == 0 {
+		return "-"
+	}
+
+	keys := make([]string, 0, len(raw))
+	for key := range raw {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key+"="+toString(raw[key]))
+	}
+
+	return strings.Join(parts, ",")
 }
 
 func formatSchedulable(v any) string {

@@ -82,8 +82,8 @@ func (h *Handler) CreateNodeObject(c *gin.Context) {
 }
 
 // PatchNode godoc
-// @Summary Update node scheduling policy
-// @Description Updates node scheduling policy fields such as spec.unschedulable.
+// @Summary Update node scheduling policy and labels
+// @Description Updates mutable node fields such as spec.unschedulable and metadata.labels.
 // @Tags orchestrator-node
 // @Accept json
 // @Produce json

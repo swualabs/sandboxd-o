@@ -19,7 +19,10 @@ func TestSQLiteNodeRepo_CRUDAndUpdates(t *testing.T) {
 	defer r.Close()
 
 	ctx := context.Background()
-	if err := r.UpsertNode(ctx, "n1", "127.0.0.1", 8081, false, "api"); err != nil {
+	if err := r.UpsertNode(ctx, "n1", "127.0.0.1", 8081, false, map[string]string{
+		"node-type": "example",
+		"region":    "ap-northeast-2",
+	}, "api"); err != nil {
 		t.Fatalf("UpsertNode err=%v", err)
 	}
 
@@ -34,6 +37,10 @@ func TestSQLiteNodeRepo_CRUDAndUpdates(t *testing.T) {
 
 	if n.Unschedulable {
 		t.Fatalf("unschedulable=%v", n.Unschedulable)
+	}
+
+	if n.Metadata.Labels["node-type"] != "example" || n.Metadata.Labels["region"] != "ap-northeast-2" {
+		t.Fatalf("labels=%v", n.Metadata.Labels)
 	}
 
 	now := time.Now().UTC()
@@ -81,7 +88,7 @@ func TestSQLiteNodeRepo_SetNodeExternal(t *testing.T) {
 	defer r.Close()
 
 	ctx := context.Background()
-	if err := r.UpsertNode(ctx, "n1", "127.0.0.1", 8081, false, "api"); err != nil {
+	if err := r.UpsertNode(ctx, "n1", "127.0.0.1", 8081, false, nil, "api"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -120,7 +127,7 @@ func TestSQLiteNodeRepo_SetNodeUnschedulable(t *testing.T) {
 	defer r.Close()
 
 	ctx := context.Background()
-	if err := r.UpsertNode(ctx, "n1", "127.0.0.1", 8081, false, "api"); err != nil {
+	if err := r.UpsertNode(ctx, "n1", "127.0.0.1", 8081, false, nil, "api"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -146,7 +153,7 @@ func TestSQLiteNodeRepo_ExternalCRUD(t *testing.T) {
 	defer r.Close()
 
 	ctx := context.Background()
-	if err := r.UpsertNode(ctx, "n1", "127.0.0.1", 8081, false, "api"); err != nil {
+	if err := r.UpsertNode(ctx, "n1", "127.0.0.1", 8081, false, nil, "api"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -193,11 +200,11 @@ func TestSQLiteNodeRepo_SetNodeExternal_Conflict(t *testing.T) {
 	defer r.Close()
 
 	ctx := context.Background()
-	if err := r.UpsertNode(ctx, "n1", "127.0.0.1", 8081, false, "api"); err != nil {
+	if err := r.UpsertNode(ctx, "n1", "127.0.0.1", 8081, false, nil, "api"); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := r.UpsertNode(ctx, "n2", "127.0.0.1", 8082, false, "api"); err != nil {
+	if err := r.UpsertNode(ctx, "n2", "127.0.0.1", 8082, false, nil, "api"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -225,7 +232,7 @@ func TestSQLiteNodeRepo_DeleteNode_ClearsReservedPorts(t *testing.T) {
 	defer r.Close()
 
 	ctx := context.Background()
-	if err := r.UpsertNode(ctx, "n1", "127.0.0.1", 8081, false, "api"); err != nil {
+	if err := r.UpsertNode(ctx, "n1", "127.0.0.1", 8081, false, nil, "api"); err != nil {
 		t.Fatalf("UpsertNode err=%v", err)
 	}
 
@@ -286,7 +293,7 @@ func TestSQLiteNodeRepo_AdjustNodeResourceUsage(t *testing.T) {
 	defer r.Close()
 
 	ctx := context.Background()
-	if err := r.UpsertNode(ctx, "n1", "127.0.0.1", 8081, false, "api"); err != nil {
+	if err := r.UpsertNode(ctx, "n1", "127.0.0.1", 8081, false, nil, "api"); err != nil {
 		t.Fatalf("UpsertNode err=%v", err)
 	}
 

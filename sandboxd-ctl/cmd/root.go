@@ -20,6 +20,7 @@ type Options struct {
 	Timeout      time.Duration
 	Output       string
 	Limit        int
+	ShowLabels   bool
 }
 
 func NewRoot() *cobra.Command {
@@ -86,6 +87,7 @@ func NewRoot() *cobra.Command {
 	cmd.AddCommand(newDeleteCommand(opts))
 	cmd.AddCommand(newCordonCommand(opts))
 	cmd.AddCommand(newUncordonCommand(opts))
+	cmd.AddCommand(newLabelCommand(opts))
 	cmd.AddCommand(newLogsCommand(opts))
 
 	return cmd

@@ -11,6 +11,7 @@ type SandboxManifest struct {
 	APIVersion string         `yaml:"apiVersion"`
 	Kind       string         `yaml:"kind"`
 	ID         string         `yaml:"id"`
+	Metadata   map[string]any `yaml:"metadata,omitempty"`
 	Spec       map[string]any `yaml:"spec"`
 }
 
@@ -49,7 +50,11 @@ func ParseManifest(raw []byte) (map[string]any, error) {
 		if _, ok := m.Spec["port"]; !ok {
 			return nil, fmt.Errorf("spec.port is required")
 		}
-		return map[string]any{"kind": "Node", "id": id, "spec": m.Spec}, nil
+		out := map[string]any{"kind": "Node", "id": id, "spec": m.Spec}
+		if len(m.Metadata) > 0 {
+			out["metadata"] = m.Metadata
+		}
+		return out, nil
 	case "external":
 		if m.Spec == nil {
 			return nil, fmt.Errorf("spec is required")

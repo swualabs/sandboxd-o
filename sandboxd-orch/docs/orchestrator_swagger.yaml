@@ -167,6 +167,8 @@ definitions:
     properties:
       id:
         type: string
+      metadata:
+        $ref: '#/definitions/types.ObjectMeta'
       spec:
         $ref: '#/definitions/types.NodeObjectSpec'
     type: object
@@ -198,6 +200,8 @@ definitions:
         type: string
       last_heartbeat:
         type: string
+      metadata:
+        $ref: '#/definitions/types.ObjectMeta'
       port:
         type: integer
       resources:
@@ -223,6 +227,20 @@ definitions:
         type: integer
       unschedulable:
         type: boolean
+    type: object
+  types.ObjectMeta:
+    properties:
+      labels:
+        additionalProperties:
+          type: string
+        type: object
+    type: object
+  types.PatchNodeObjectMeta:
+    properties:
+      labels:
+        additionalProperties:
+          type: string
+        type: object
     type: object
   types.NodeResources:
     properties:
@@ -259,6 +277,8 @@ definitions:
     - NodeStateNotReady
   types.PatchNodeObjectRequest:
     properties:
+      metadata:
+        $ref: '#/definitions/types.PatchNodeObjectMeta'
       spec:
         $ref: '#/definitions/types.PatchNodeObjectSpec'
     type: object
@@ -564,7 +584,7 @@ paths:
     patch:
       consumes:
       - application/json
-      description: Updates node scheduling policy fields such as spec.unschedulable.
+      description: Updates mutable node fields such as spec.unschedulable and metadata.labels.
       parameters:
       - description: Node id
         in: path
@@ -596,7 +616,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Update node scheduling policy
+      summary: Update node scheduling policy and labels
       tags:
       - orchestrator-node
   /api/v1/nodes/{id}/heartbeat:

@@ -125,6 +125,141 @@ func TestSandboxCreateAndSchedule_DynamicPort(t *testing.T) {
 	}
 }
 
+func TestSandboxCreateAndSchedule_NodeSelector(t *testing.T) {
+	var n1Calls int
+	node1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/sandboxes" {
+			n1Calls++
+			_ = json.NewEncoder(w).Encode(map[string]any{"sandbox": map[string]any{"id": "sbx-selector"}})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer node1.Close()
+
+	var n2Calls int
+	node2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/sandboxes" {
+			n2Calls++
+			_ = json.NewEncoder(w).Encode(map[string]any{"sandbox": map[string]any{"id": "sbx-selector"}})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer node2.Close()
+
+	s := newServiceWithNode(t, node1)
+	defer s.Close()
+
+	u2, _ := url.Parse(node2.URL)
+	port2, _ := strconv.Atoi(u2.Port())
+	if err := s.repo.UpsertNode(context.Background(), "n2", u2.Hostname(), port2, false, map[string]string{
+		"node-type": "example",
+		"region":    "ap-northeast-2",
+	}, "api"); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	_ = s.repo.UpdateHeartbeat(context.Background(), "n1", types.NodeStateReady, 1, 0, "", &now)
+	_ = s.repo.UpdateNodeResources(context.Background(), "n1", types.NodeResources{
+		AllocatableCPUMilli: 3500,
+		AllocatableMemory:   7 * 1024 * 1024 * 1024,
+		AvailableCPUMilli:   3500,
+		AvailableMemory:     7 * 1024 * 1024 * 1024,
+	})
+	_ = s.repo.UpdateHeartbeat(context.Background(), "n2", types.NodeStateReady, 1, 0, "", &now)
+	_ = s.repo.UpdateNodeResources(context.Background(), "n2", types.NodeResources{
+		AllocatableCPUMilli: 3500,
+		AllocatableMemory:   7 * 1024 * 1024 * 1024,
+		AvailableCPUMilli:   3500,
+		AvailableMemory:     7 * 1024 * 1024 * 1024,
+	})
+
+	_, err := s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
+		ID: "sbx-selector",
+		Spec: types.SandboxSpec{
+			NodeSelector: map[string]string{
+				"node-type": "example",
+				"region":    "ap-northeast-2",
+			},
+			Containers: []types.SandboxContainerSpec{{
+				Name:     "web",
+				Image:    "nginx",
+				Resource: types.SandboxResource{CPU: "200m", Memory: "256Mi"},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.runSchedulerOnce(context.Background())
+	got, err := s.GetSandbox(context.Background(), "sbx-selector")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Status.Phase != types.SandboxPhaseScheduled {
+		t.Fatalf("phase=%s", got.Status.Phase)
+	}
+
+	if got.Status.NodeName != "n2" {
+		t.Fatalf("node=%s", got.Status.NodeName)
+	}
+
+	if n1Calls != 0 {
+		t.Fatalf("expected no create calls on n1, got=%d", n1Calls)
+	}
+
+	if n2Calls != 1 {
+		t.Fatalf("expected one create call on n2, got=%d", n2Calls)
+	}
+}
+
+func TestSandboxCreateAndSchedule_NodeSelectorNoMatchFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/sandboxes" {
+			t.Fatal("unexpected create call when selector has no match")
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	s := newServiceWithNode(t, server)
+	defer s.Close()
+
+	_, err := s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
+		ID: "sbx-selector-miss",
+		Spec: types.SandboxSpec{
+			NodeSelector: map[string]string{
+				"node-type": "gpu",
+			},
+			Containers: []types.SandboxContainerSpec{{
+				Name:     "web",
+				Image:    "nginx",
+				Resource: types.SandboxResource{CPU: "200m", Memory: "256Mi"},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.runSchedulerOnce(context.Background())
+	got, err := s.GetSandbox(context.Background(), "sbx-selector-miss")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Status.Phase != types.SandboxPhaseFailed {
+		t.Fatalf("phase=%s", got.Status.Phase)
+	}
+	if got.Status.LastError != "no feasible schedulable node for selector/resources/ports" {
+		t.Fatalf("lastError=%q", got.Status.LastError)
+	}
+}
+
 func TestCreateSandboxOnNode_ForwardsEphemeralStorage(t *testing.T) {
 	var captured model.CreateSandboxRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -368,6 +503,31 @@ func TestCreateSandbox_RejectsInvalidEphemeralStorage(t *testing.T) {
 		t.Fatal("expected create validation error")
 	}
 
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestCreateSandbox_RejectsEmptyNodeSelectorKey(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	s := newServiceWithNode(t, server)
+	defer s.Close()
+
+	_, err := s.CreateSandbox(context.Background(), types.CreateSandboxObjectRequest{
+		ID: "sbx-invalid-selector",
+		Spec: types.SandboxSpec{
+			NodeSelector: map[string]string{
+				" ": "prod",
+			},
+			Containers: []types.SandboxContainerSpec{{
+				Name:     "app",
+				Image:    "ubuntu:24.04",
+				Resource: types.SandboxResource{CPU: "100m", Memory: "64Mi"},
+			}},
+		},
+	})
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("expected ErrInvalidInput, got %v", err)
 	}
@@ -1232,7 +1392,7 @@ func TestScheduler_SkipsUnschedulableNode(t *testing.T) {
 		t.Fatalf("node expected empty, got=%s", got.Status.NodeName)
 	}
 
-	if got.Status.LastError != "no feasible schedulable node for resources/ports" {
+	if got.Status.LastError != "no feasible schedulable node for selector/resources/ports" {
 		t.Fatalf("last_error=%q", got.Status.LastError)
 	}
 }

@@ -156,6 +156,12 @@ func validateSandboxCreate(req types.CreateSandboxObjectRequest) error {
 		return fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
 
+	for key := range req.Spec.NodeSelector {
+		if strings.TrimSpace(key) == "" {
+			return fmt.Errorf("%w: node_selector key is required", ErrInvalidInput)
+		}
+	}
+
 	if len(req.Spec.Containers) == 0 {
 		return fmt.Errorf("%w: at least one container is required", ErrInvalidInput)
 	}
@@ -399,6 +405,10 @@ func (s *Service) scheduleOne(ctx context.Context, sbx types.Sandbox) {
 			continue
 		}
 
+		if !nodeMatchesSelector(n, sbx.Spec.NodeSelector) {
+			continue
+		}
+
 		if n.Resources.AvailableCPUMilli < needCPU || n.Resources.AvailableMemory < needMem {
 			continue
 		}
@@ -418,7 +428,7 @@ func (s *Service) scheduleOne(ctx context.Context, sbx types.Sandbox) {
 
 	if len(cands) == 0 {
 		sbx.Status.Phase = types.SandboxPhaseFailed
-		sbx.Status.LastError = "no feasible schedulable node for resources/ports"
+		sbx.Status.LastError = "no feasible schedulable node for selector/resources/ports"
 		_ = s.sbxRepo.UpdateSandboxStatus(ctx, sbx.ID, sbx.Status)
 
 		slog.Info("scheduler sandbox failed no candidate", slog.String("sandbox", sbx.ID), slog.Int64("need_cpu_milli", needCPU), slog.Int64("need_memory_bytes", needMem))
@@ -496,6 +506,20 @@ func (s *Service) scheduleOne(ctx context.Context, sbx types.Sandbox) {
 
 	go s.refreshSandboxIPSoon(fresh.ID, fresh.Status.NodeName)
 	slog.Info("scheduler sandbox scheduled", slog.String("sandbox", fresh.ID), slog.String("node", fresh.Status.NodeName))
+}
+
+func nodeMatchesSelector(node types.Node, selector map[string]string) bool {
+	if len(selector) == 0 {
+		return true
+	}
+
+	for key, want := range selector {
+		if got, ok := node.Metadata.Labels[key]; !ok || got != want {
+			return false
+		}
+	}
+
+	return true
 }
 
 func (s *Service) fetchSandboxIPOnce(ctx context.Context, nodeName, sandboxID string) string {

@@ -42,6 +42,12 @@ Create or update a node object.
 ```json
 {
     "id": "node-a",
+    "metadata": {
+        "labels": {
+            "region": "ap-northeast-2",
+            "node-type": "general"
+        }
+    },
     "spec": {
         "ip": "192.168.0.3",
         "port": 8080,
@@ -170,6 +176,12 @@ Update mutable node scheduling policy fields.
 
 ```json
 {
+    "metadata": {
+        "labels": {
+            "region": "ap-northeast-2",
+            "legacy": null
+        }
+    },
     "spec": {
         "unschedulable": true
     }
@@ -191,6 +203,11 @@ Update mutable node scheduling policy fields.
 ```
 
 `unschedulable` only affects future scheduling decisions. Existing sandboxes on the node continue running and can still be inspected or deleted normally.
+
+`metadata.labels` is patched as a partial map:
+
+- `"key": "value"` adds or updates a label.
+- `"key": null` removes a label.
 
 ### DELETE /api/v1/nodes/{name}
 

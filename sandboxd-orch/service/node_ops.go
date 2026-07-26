@@ -22,7 +22,7 @@ func (s *Service) RegisterNode(ctx context.Context, req types.RegisterNodeReques
 		source = "api"
 	}
 
-	if err := s.repo.UpsertNode(ctx, req.ID, req.IP, req.Port, req.Unschedulable, source); err != nil {
+	if err := s.repo.UpsertNode(ctx, req.ID, req.IP, req.Port, req.Unschedulable, nil, source); err != nil {
 		return nil, err
 	}
 
@@ -37,12 +37,25 @@ func (s *Service) RegisterNode(ctx context.Context, req types.RegisterNodeReques
 }
 
 func (s *Service) CreateNodeObject(ctx context.Context, req types.CreateNodeObjectRequest) (*types.Node, error) {
-	return s.RegisterNode(ctx, types.RegisterNodeRequest{
-		ID:            strings.TrimSpace(req.ID),
-		IP:            strings.TrimSpace(req.Spec.IP),
-		Port:          req.Spec.Port,
-		Unschedulable: req.Spec.Unschedulable,
-	}, "object")
+	id := strings.TrimSpace(req.ID)
+	ip := strings.TrimSpace(req.Spec.IP)
+	if err := validateNodeInput(id, ip, req.Spec.Port); err != nil {
+		return nil, err
+	}
+
+	labels := sanitizeLabels(req.Metadata.Labels)
+	if err := s.repo.UpsertNode(ctx, id, ip, req.Spec.Port, req.Spec.Unschedulable, labels, "object"); err != nil {
+		return nil, err
+	}
+
+	n, err := s.repo.GetNode(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	s.probeNode(ctx, *n)
+	s.syncNodeResources(ctx, *n)
+	return s.repo.GetNode(ctx, id)
 }
 
 func (s *Service) PatchNodeObject(ctx context.Context, id string, req types.PatchNodeObjectRequest) (*types.Node, error) {
@@ -51,16 +64,37 @@ func (s *Service) PatchNodeObject(ctx context.Context, id string, req types.Patc
 		return nil, fmt.Errorf("%w: id is required", ErrInvalidInput)
 	}
 
-	if req.Spec.Unschedulable == nil {
-		return nil, fmt.Errorf("%w: spec.unschedulable is required", ErrInvalidInput)
-	}
-
-	if _, err := s.repo.GetNode(ctx, id); err != nil {
+	cur, err := s.repo.GetNode(ctx, id)
+	if err != nil {
 		return nil, err
 	}
 
-	if err := s.repo.SetNodeUnschedulable(ctx, id, *req.Spec.Unschedulable); err != nil {
-		return nil, err
+	hasLabelPatch := req.Metadata != nil && req.Metadata.Labels != nil
+	if req.Spec.Unschedulable == nil && !hasLabelPatch {
+		return nil, fmt.Errorf("%w: at least one of spec.unschedulable or metadata.labels is required", ErrInvalidInput)
+	}
+
+	if req.Spec.Unschedulable != nil {
+		if err := s.repo.SetNodeUnschedulable(ctx, id, *req.Spec.Unschedulable); err != nil {
+			return nil, err
+		}
+	}
+
+	if hasLabelPatch {
+		labels, err := applyLabelPatch(cur.Metadata.Labels, req.Metadata.Labels)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := s.repo.UpsertNode(ctx, cur.ID, cur.IP, cur.Port, cur.Unschedulable, labels, cur.Source); err != nil {
+			return nil, err
+		}
+
+		if req.Spec.Unschedulable != nil {
+			if err := s.repo.SetNodeUnschedulable(ctx, id, *req.Spec.Unschedulable); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	return s.repo.GetNode(ctx, id)
@@ -200,6 +234,55 @@ func (s *Service) detachNodeSandboxes(ctx context.Context, nodeName string, forc
 
 func (s *Service) ListNodes(ctx context.Context) ([]types.Node, error) {
 	return s.repo.ListNodes(ctx)
+}
+
+func sanitizeLabels(labels map[string]string) map[string]string {
+	if len(labels) == 0 {
+		return nil
+	}
+
+	out := make(map[string]string, len(labels))
+	for key, value := range labels {
+		k := strings.TrimSpace(key)
+		if k == "" {
+			continue
+		}
+
+		out[k] = strings.TrimSpace(value)
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+
+	return out
+}
+
+func applyLabelPatch(current map[string]string, patch map[string]*string) (map[string]string, error) {
+	next := sanitizeLabels(current)
+	if next == nil {
+		next = map[string]string{}
+	}
+
+	for key, value := range patch {
+		k := strings.TrimSpace(key)
+		if k == "" {
+			return nil, fmt.Errorf("%w: metadata.labels key is required", ErrInvalidInput)
+		}
+
+		if value == nil {
+			delete(next, k)
+			continue
+		}
+
+		next[k] = strings.TrimSpace(*value)
+	}
+
+	if len(next) == 0 {
+		return nil, nil
+	}
+
+	return next, nil
 }
 
 func (s *Service) GetNode(ctx context.Context, id string) (*types.Node, error) {

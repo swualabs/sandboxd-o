@@ -28,6 +28,7 @@ type CreateWorkerInput struct {
 	RootVolume    string // e.g. "64Gi"
 	External      string // optional hostname; defaults to the worker's EIP when left empty
 	PublicEIP     string // ARN or allocation id; empty means "auto-allocate a managed EIP"
+	NodeLabels    map[string]string
 	ConfigPath    string // optional JSON overrides file
 	ECRRepos      string // comma-separated ECR repo name patterns to grant pull access to, e.g. "my-repo-1,ctf-*"
 	OrchServer    string // explicit orch base URL override (SBXADM_ORCH_SERVER)
@@ -208,14 +209,20 @@ func CreateWorker(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc 
 		s.Step("registering Node object %q with orchestrator at %s", name, orchServer)
 		oc := client.New(orchServer, orDefault(in.OrchTimeout, 15*time.Second), cluster.SharedSecret)
 		nodeCtx, cancel := context.WithTimeout(ctx, orDefault(in.OrchTimeout, 15*time.Second))
-		_, err = oc.CreateNodeObject(nodeCtx, map[string]any{
+		req := map[string]any{
 			"id": name,
 			"spec": map[string]any{
 				"ip":            privateIP,
 				"port":          letAPIPort,
 				"unschedulable": false,
 			},
-		})
+		}
+		if len(in.NodeLabels) > 0 {
+			req["metadata"] = map[string]any{
+				"labels": in.NodeLabels,
+			}
+		}
+		_, err = oc.CreateNodeObject(nodeCtx, req)
 		cancel()
 		if err != nil {
 			return fmt.Errorf("register node %q with orchestrator: %w", name, err)
@@ -252,6 +259,7 @@ func CreateWorker(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc 
 		InstanceType:     in.InstanceType,
 		SubnetID:         subnetID,
 		SecurityGroup:    cluster.WorkerSecurityGroup,
+		NodeLabels:       cloneLabels(in.NodeLabels),
 		PublicEIPAllocID: eipAllocID,
 		PublicEIPManaged: eipManaged,
 		PublicIP:         publicIP,
@@ -275,6 +283,19 @@ func CreateWorker(ctx context.Context, ec2c *ec2.Client, iamc *iam.Client, ssmc 
 
 	rollback.clear()
 	return nil
+}
+
+func cloneLabels(labels map[string]string) map[string]string {
+	if len(labels) == 0 {
+		return nil
+	}
+
+	out := make(map[string]string, len(labels))
+	for key, value := range labels {
+		out[key] = value
+	}
+
+	return out
 }
 
 func DeleteWorker(ctx context.Context, ec2c *ec2.Client, st *store.Store, clusterName, workerName string, orchServer string, orchTimeout time.Duration, s *stepper.Stepper) error {

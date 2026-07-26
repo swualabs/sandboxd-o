@@ -217,7 +217,7 @@ const docTemplateorchestrator = `{
                 }
             },
             "patch": {
-                "description": "Updates node scheduling policy fields such as spec.unschedulable.",
+                "description": "Updates mutable node fields such as spec.unschedulable and metadata.labels.",
                 "consumes": [
                     "application/json"
                 ],
@@ -227,7 +227,7 @@ const docTemplateorchestrator = `{
                 "tags": [
                     "orchestrator-node"
                 ],
-                "summary": "Update node scheduling policy",
+                "summary": "Update node scheduling policy and labels",
                 "parameters": [
                     {
                         "type": "string",

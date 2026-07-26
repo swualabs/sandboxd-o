@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS nodes (
   name TEXT PRIMARY KEY,
   ip TEXT NOT NULL,
   port INTEGER NOT NULL,
+  labels_json TEXT NOT NULL DEFAULT '{}',
   source TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -105,6 +106,21 @@ CREATE TABLE IF NOT EXISTS node_externals (
 			}
 
 			_, err = db.Exec(`ALTER TABLE nodes ADD COLUMN unschedulable INTEGER NOT NULL DEFAULT 0`)
+			return err
+		},
+	},
+	{
+		name: "add nodes.labels_json",
+		up: func(db *sql.DB) error {
+			ok, err := sqliteColumnExists(db, "nodes", "labels_json")
+			if err != nil {
+				return err
+			}
+			if ok {
+				return nil
+			}
+
+			_, err = db.Exec(`ALTER TABLE nodes ADD COLUMN labels_json TEXT NOT NULL DEFAULT '{}'`)
 			return err
 		},
 	},
